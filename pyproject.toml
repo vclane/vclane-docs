@@ -1,0 +1,11 @@
+[project]
+name = "vclane-docs"
+version = "0.1.0"
+description = "VC-LANE Adaptive Traffic Monitoring System — Documentation"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "zensical>=0.0.51",
+]
