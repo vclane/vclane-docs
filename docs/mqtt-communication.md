@@ -67,7 +67,9 @@ traffic/
 
 **Device Control** — Backend can send traffic light commands, configuration updates, restart commands, and AI model updates.
 
-**Device Monitoring** — Online/offline detection, heartbeat tracking, last-seen monitoring, connection status reporting.
+**Device Monitoring** — Online/offline detection, heartbeat tracking, connection status reporting.
+
+> **Note on Last-Seen:** The "last seen" timestamp is no longer stored in Firestore. Instead, it is derived from the `timestamp` field in RTDB sensor data (`sensors/{deviceId}`), which is updated whenever the edge device publishes a telemetry payload. This avoids excessive Firestore writes from frequent heartbeat updates.
 
 **Traffic Synchronization** — Multi-intersection synchronization via group topics:
 

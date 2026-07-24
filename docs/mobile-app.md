@@ -140,6 +140,8 @@ No `autoDispose` is used — all providers are global singletons for the app lif
 | `SensorReading` | vehicleCount, currentTrafficLightSignal, timestamp |
 | `SignalOverride` | deviceId, targetSignal, requestedAt |
 
+> **Note:** `lastSeen` was previously stored in Firestore as a `Timestamp` on the Device document. It has been removed from Firestore. The "Last seen" timestamp is now derived from the `timestamp` field in `SensorReading`, which is stored in the Realtime Database at `sensors/{deviceId}`. This avoids excessive Firestore writes from frequent heartbeat updates.
+
 ## Implementation Notes
 
 - **Signal overrides** use an in-memory mock map. TODO: replace with backend API call when the endpoint is available.
