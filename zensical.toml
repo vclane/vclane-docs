@@ -23,6 +23,8 @@ nav = [
 
 [project.theme]
 variant = "modern"
+logo = "assets/logo.png"
+favicon = "assets/logo.png"
 features = [
   "navigation.tabs",
   "navigation.sections",
