@@ -14,8 +14,7 @@ nav = [
   { "Documentation" = [
     { "Architecture" = "architecture.md" },
     { "Edge Device" = "edge-device.md" },
-    { "Backend API" = "backend-api.md" },
-    { "Server Integration" = "server-integration.md" },
+    { "Backend API & Server Integration" = "server-integration.md" },
     { "Media Server" = "media-server.md" },
     { "Mobile App" = "mobile-app.md" },
   ]},
