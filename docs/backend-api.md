@@ -2,6 +2,27 @@
 
 The backend acts as the centralized management and coordination layer between users, edge devices, and cloud services.
 
+## Backend Architecture
+
+```mermaid
+graph TB
+    subgraph Server["VC-LANE Server (Docker Compose)"]
+        Caddy["Reverse Proxy — Caddy<br/>(TLS termination)"]
+        Backend["Backend API — FastAPI<br/>(Auth / Commands / Telemetry)"]
+        Media["Media Server — MediaMTX<br/>(RTSP / WebRTC relay)"]
+        MQTT["MQTT Broker — Mosquitto<br/>(TLS + password auth)"]
+
+        Caddy -->|"/api/* /ws/* /health"| Backend
+        Caddy -->|"/stream/*"| Media
+        Backend -->|"Auth query"| Media
+    end
+
+    Backend -->|"Auth / DB"| Firebase["Firebase Services<br/>(Auth / Firestore / RTDB)"]
+    MQTT -->|"Commands / Sync"| Edge["Raspberry Pi Edge Devices"]
+    Edge -->|"Telemetry / Heartbeat / Ack"| MQTT
+    Edge -->|"RTSP Stream"| Media
+```
+
 ## Responsibilities
 
 - User authentication
