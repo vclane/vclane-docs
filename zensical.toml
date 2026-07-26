@@ -13,9 +13,11 @@ nav = [
   ]},
   { "Documentation" = [
     { "Architecture" = "architecture.md" },
-    { "Edge Device" = "edge-device.md" },
-    { "Backend API & Server Integration" = "server-integration.md" },
+    { "Backend API" = "backend-api.md" },
     { "Media Server" = "media-server.md" },
+    { "MQTT Communication" = "mqtt-communication.md" },
+    { "Server Integration" = "server-integration.md" },
+    { "Edge Device" = "edge-device.md" },
     { "Mobile App" = "mobile-app.md" },
   ]},
 ]

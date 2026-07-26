@@ -1,27 +1,16 @@
-# MQTT Communication Layer
+# MQTT Communication
 
-MQTT provides the real-time communication channel between the backend and edge devices, enabling bidirectional messaging.
+MQTT provides the real-time communication channel between the backend and edge devices over the Mosquitto broker, enabling bidirectional messaging for telemetry, commands, and synchronization.
 
-## Responsibilities
+## Broker
 
-- Deliver commands to edge devices
-- Receive telemetry
-- Receive heartbeat updates
-- Handle acknowledgements
-- Maintain persistent connections
+The VC-LANE server uses **Mosquitto** as its MQTT broker, running inside the Docker Compose stack.
 
-## Recommended Brokers
+- Internal port: `1883` (no TLS — backend and broker are on the same Docker network)
+- External port (when enabled): `8883` (TLS, for edge devices)
+- Authentication: password file managed via `mosquitto_passwd`
 
-- EMQX
-- Mosquitto
-
-## Security
-
-- MQTT over TLS
-- Device authentication
-- Topic authorization
-
-## MQTT Topic Structure
+## Topic Structure
 
 ```text
 traffic/
@@ -29,28 +18,60 @@ traffic/
         {deviceId}/
             telemetry
             heartbeat
-            status
-            commands
             acknowledgements
+            commands
 
     group/
         {groupId}/
             prepare
             prepare-response
-            commit
-            abort
 ```
+
+## Topic Reference
+
+| Direction | Topic | Publisher | Consumer | Payload |
+|---|---|---|---|---|
+| Device → Backend | `traffic/device/{id}/telemetry` | Edge device | Backend (→RTDB) | Arbitrary JSON |
+| Device → Backend | `traffic/device/{id}/heartbeat` | Edge device | Backend (→RTDB) | Arbitrary JSON |
+| Device → Backend | `traffic/device/{id}/acknowledgements` | Edge device | Backend (logged) | Arbitrary JSON |
+| Device → Backend | `traffic/group/{id}/prepare-response` | Edge device | Backend (unhandled) | Arbitrary JSON |
+| Backend → Device | `traffic/device/{id}/commands` | Backend | Edge device | `{"command": str, "payload": {}}` |
+| Backend → Devices | `traffic/group/{id}/prepare` | Backend | Edge devices in group | `{"deviceIds": [str]}` |
+
+## Mosquitto ACL
+
+The ACL file controls topic-level access for each connecting client:
+
+```
+user vclane-backend
+  pattern rw traffic/device/+/#
+  pattern rw traffic/group/+/#
+
+pattern read write traffic/device/%u/#
+pattern read write traffic/group/+/#
+```
+
+- `vclane-backend` (the backend's internal MQTT client) has read/write on all device and group topics.
+- `%u` expands to the connecting device's username (= `deviceId`), scoping each device to its own topics.
+- All devices can read/write group topics for synchronization.
+
+## Security
+
+- MQTT over TLS on the external listener (port 8883) for edge device connections
+- Username/password authentication via `mosquitto_passwd` file
+- Topic-based access control via ACL
+- Devices are provisioned with a unique device secret used as both MQTT and RTSP password
 
 ## Technology Stack
 
-| Component      | Technology                                  |
-| -------------- | ------------------------------------------- |
-| Protocol       | MQTT v5                                     |
-| Encryption     | TLS                                         |
-| MQTT Broker    | EMQX / Mosquitto                            |
-| Authentication | X.509 Certificate / Username Authentication |
-| Authorization  | Topic-Based Access Control                  |
-| Message Format | JSON                                        |
+| Component      | Technology                         |
+| -------------- | ---------------------------------- |
+| Protocol       | MQTT v5                            |
+| Encryption     | TLS (external)                     |
+| MQTT Broker    | Mosquitto                          |
+| Authentication | Password file + `mosquitto_passwd` |
+| Authorization  | Topic-based ACL                    |
+| Message Format | JSON                               |
 
 ## Key Features
 
@@ -65,17 +86,12 @@ traffic/
 }
 ```
 
-**Device Control** — Backend can send traffic light commands, configuration updates, restart commands, and AI model updates.
+**Device Control** — Backend can send traffic light commands, configuration updates, restart commands, and AI model updates via MQTT publish.
 
 **Device Monitoring** — Online/offline detection, heartbeat tracking, connection status reporting.
 
-> **Note on Last-Seen:** The "last seen" timestamp is no longer stored in Firestore. Instead, it is derived from the `timestamp` field in RTDB sensor data (`sensors/{deviceId}`), which is updated whenever the edge device publishes a telemetry payload. This avoids excessive Firestore writes from frequent heartbeat updates.
-
 **Traffic Synchronization** — Multi-intersection synchronization via group topics:
-
 - `traffic/group/{groupId}/prepare`
 - `traffic/group/{groupId}/prepare-response`
-- `traffic/group/{groupId}/commit`
-- `traffic/group/{groupId}/abort`
 
-Features coordinated intersection control with reliable command delivery.
+See [Server Integration](server-integration.md) for end-to-end authentication flows and device provisioning details.
