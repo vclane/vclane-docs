@@ -156,40 +156,42 @@ All inbound handlers parse the topic to extract `deviceId` (third segment) and r
 
 ### Device Authentication (End-to-End)
 
-```
-┌──────────────┐     MQTT connect       ┌──────────────┐
-│  Edge Device │────(deviceId+secret)───▶│   Mosquitto  │
-│  (Raspberry  │                          │              │
-│   Pi)        │◀───ACL enforced─────────│  password_   │
-│              │                         │  file + acl  │
-│              │     RTSP publish        └──────┬───────┘
-│              │────(rtsp://deviceId@───┐       │
-│              │    mediamtx:8554/id)   │       │
-│              │                       ▼       │
-│              │                ┌──────────┐   │
-│              │                │ MediaMTX │   │
-│              │                │          │   │
-│              │                │  HTTP    │   │
-│              │                │  GET     │   │
-│              │                │  /api/   │   │
-│              │                │  mediamtx│   │
-│              │                │  /auth   │   │
-│              │                └────┬─────┘   │
-│              │                     │         │
-│              │                     ▼         │
-│              │                ┌──────────┐   │
-│              │                │ Backend  │   │
-│              │                │ FastAPI  │   │
-│              │                │          │   │
-│              │                │ bcrypt   │   │
-│              │                │ verify   │   │
-│              │                │ vs       │   │
-│              │                │ Firestore│   │
-│              │                │ hash     │   │
-│              │                └──────────┘   │
-│              │◀────MQTT commands─────────────┘
-│              │────MQTT telemetry─────────────▶
-└──────────────┘
+```mermaid
+sequenceDiagram
+    participant Edge as Edge Device
+    participant MQTT as Mosquitto
+    participant MTX as MediaMTX
+    participant API as Backend API
+    participant DB as Firestore
+
+    Edge->>+MQTT: MQTT connect<br/>(deviceId, deviceSecret)
+    MQTT->>MQTT: verify via mosquitto_passwd file
+    MQTT-->>-Edge: ACL granted<br/>(own device topics + group topics)
+
+    Edge->>+MTX: RTSP publish<br/>rtsp://deviceId@mediamtx:8554/deviceId
+    MTX->>+API: GET /api/mediamtx/auth<br/>?user=deviceId&password=deviceSecret
+    Note over API: JWT verify fails → device auth
+
+    API->>+DB: read devices/{deviceId}.deviceSecretHash
+    DB-->>-API: bcrypt hash
+    API->>API: bcrypt.checkpw(secret, hash)
+
+    alt valid credentials
+        API-->>-MTX: 200 OK
+        MTX-->>-Edge: Stream accepted
+
+        loop Device lifecycle
+            Edge->>MQTT: telemetry/heartbeat
+            MQTT->>API: forward to handler
+            API->>DB: write to RTDB /telemetry/{id}
+            API->>MQTT: publish commands to topic
+            MQTT->>Edge: deliver command
+            Edge->>MQTT: acknowledgement
+        end
+    else invalid credentials
+        API-->>MTX: 403 Forbidden
+        MTX-->>Edge: Stream rejected
+    end
 ```
 
 ### Command Formats
