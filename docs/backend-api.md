@@ -21,15 +21,16 @@ The backend acts as the centralized management and coordination layer between us
 | ----------------------- | ----------------------------------- |
 | Programming Language    | Python                              |
 | Backend Framework       | FastAPI                             |
-| API Architecture        | REST API                            |
-| Real-Time Communication | WebSocket                           |
-| MQTT Integration        | MQTT Client                         |
-| Authentication          | Firebase Admin SDK                  |
-| Database                | PostgreSQL / Firestore              |
-| Cache                   | Redis                               |
-| Background Processing   | Celery / Background Tasks           |
+| API Architecture        | REST API + WebSocket                |
+| MQTT Integration        | Paho MQTT Client                    |
+| MQTT Broker             | Mosquitto                           |
+| Authentication          | Firebase Admin SDK + JWT + bcrypt   |
+| Database                | Firestore                           |
+| Real-Time Sensor Data   | Realtime Database                   |
+| Media Server            | MediaMTX (RTSP / WebRTC)            |
+| Reverse Proxy           | Caddy                               |
 | API Documentation       | OpenAPI / Swagger                   |
-| Containerization        | Docker                              |
+| Containerization        | Docker + Docker Compose             |
 | Deployment              | Linux Server / Cloud Infrastructure |
 
 ## Key Features
