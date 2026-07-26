@@ -1,6 +1,6 @@
 # Backend API
 
-The backend acts as the centralized management and coordination layer between users, edge devices, and cloud services.
+The backend acts as the centralized management and coordination layer between users, edge devices, and cloud services. See [Server Integration](server-integration.md) for details on how the backend, MediaMTX, and Mosquitto work together.
 
 ## Backend Architecture
 
