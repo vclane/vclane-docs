@@ -96,7 +96,7 @@ The backend provides:
 The modular architecture supports:
 
 - Additional AI models
-- More sensor integrations
+- More telemetry integrations
 - Predictive traffic analytics
 - Emergency vehicle prioritization
 - Smart city integration

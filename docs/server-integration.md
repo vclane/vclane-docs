@@ -51,7 +51,7 @@ graph TB
 | MQTT Broker             | Mosquitto                           |
 | Authentication          | Firebase Admin SDK + JWT + bcrypt   |
 | Database                | Firestore                           |
-| Real-Time Sensor Data   | Realtime Database                   |
+| Real-Time Telemetry     | Realtime Database                   |
 | Media Server            | MediaMTX (RTSP / WebRTC)            |
 | Reverse Proxy           | Caddy                               |
 | API Documentation       | OpenAPI / Swagger                   |
