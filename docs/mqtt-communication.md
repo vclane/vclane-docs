@@ -75,7 +75,7 @@ pattern read write traffic/group/+/#
 
 ## Key Features
 
-**Telemetry Communication** — Edge devices publish traffic statistics, device health information, sensor data, and AI analysis results.
+**Telemetry Communication** — Edge devices publish traffic statistics, device health information, telemetry, and AI analysis results.
 
 ```json
 {
