@@ -73,14 +73,14 @@ graph TB
 | `GET` | `/api/devices` | JWT | List all devices |
 | `POST` | `/api/devices` | JWT | Create device + provision secret |
 | `GET` | `/api/devices/{id}` | JWT | Get device details |
-| `PUT` | `/api/devices/{id}` | JWT | Update device |
+| `PATCH` | `/api/devices/{id}` | JWT | Update device |
 | `DELETE` | `/api/devices/{id}` | JWT | Delete device |
 | `POST` | `/api/devices/{id}/commands` | JWT | Send arbitrary command |
-| `PUT` | `/api/devices/{id}/signal` | JWT | Override traffic signal |
+| `POST` | `/api/devices/{id}/signal` | JWT | Override traffic signal |
 | `GET` | `/api/groups` | JWT | List all groups |
 | `POST` | `/api/groups` | JWT | Create group |
 | `GET` | `/api/groups/{id}` | JWT | Get group details |
-| `PUT` | `/api/groups/{id}` | JWT | Update group |
+| `PATCH` | `/api/groups/{id}` | JWT | Update group |
 | `DELETE` | `/api/groups/{id}` | JWT | Delete group |
 | `POST` | `/api/groups/{id}/sync` | JWT | Trigger group prepare |
 | `GET` | `/api/mediamtx/auth` | None | MediaMTX auth callback |

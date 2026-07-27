@@ -138,7 +138,7 @@ All inbound handlers parse the topic to extract `deviceId` (third segment) and r
 | Trigger | Topic | Payload |
 |---|---|---|
 | `POST /api/devices/{id}/commands` | `traffic/device/{id}/commands` | `{"command": "...", "payload": {...}}` |
-| `PUT /api/devices/{id}/signal` | `traffic/device/{id}/commands` | `{"command": "signal_override", "payload": {"targetSignal": "..."}}` |
+| `POST /api/devices/{id}/signal` | `traffic/device/{id}/commands` | `{"command": "signal_override", "payload": {"targetSignal": "..."}}` |
 | `POST /api/groups/{id}/sync` | `traffic/group/{id}/prepare` | `{"deviceIds": ["id1", "id2", ...]}` |
 
 ---
@@ -196,7 +196,7 @@ sequenceDiagram
 
 ### Command Formats
 
-**Signal override** (published on device creation or via `PUT /api/devices/{id}/signal`):
+**Signal override** (published on device creation or via `POST /api/devices/{id}/signal`):
 
 ```json
 {
@@ -260,6 +260,6 @@ pattern read write traffic/group/+/#
 | `POST` | `/api/devices` | JWT | Create device + provision secret | `add_mosquitto_user()` via shell |
 | `DELETE` | `/api/devices/{id}` | JWT | Delete device | `remove_mosquitto_user()` via shell |
 | `POST` | `/api/devices/{id}/commands` | JWT | Send arbitrary command | MQTT publish to `traffic/device/{id}/commands` |
-| `PUT` | `/api/devices/{id}/signal` | JWT | Override traffic signal | MQTT publish + Firestore write |
+| `POST` | `/api/devices/{id}/signal` | JWT | Override traffic signal | MQTT publish + Firestore write |
 | `POST` | `/api/groups/{id}/sync` | JWT | Trigger group prepare | MQTT publish to `traffic/group/{id}/prepare` |
 | `GET` | `/api/mediamtx/auth` | _(none)_ | MediaMTX auth callback | Reads Firestore, bcrypt verify |
