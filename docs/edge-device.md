@@ -90,6 +90,77 @@ Each edge device periodically reports:
 - Camera status
 - AI processing status
 
+## Software Architecture
+
+### Project Layout
+
+```
+vclane-edge/
+├── src/vclane_edge/
+│   ├── __init__.py          # Version
+│   ├── cli.py               # Typer CLI (run, register, deregister)
+│   ├── config.py            # VclaneSettings + load_settings()
+│   ├── device.py            # VclaneEdgeDevice orchestrator
+│   ├── mqtt.py              # MQTT client (publish/subscribe)
+│   ├── video.py             # Video pipeline (3 modes)
+│   ├── yolo.py              # YOLO detection wrapper
+│   ├── sensors.py           # Mock telemetry state
+│   └── registration.py      # Provisioning flow
+├── pyproject.toml            # uv-managed deps
+├── Dockerfile                # Multi-stage container
+└── docker-compose.yml        # Edge device service
+```
+
+### CLI Commands
+
+The edge device exposes three commands via the `vclane-edge` entry point:
+
+| Command | Description |
+|---------|-------------|
+| `vclane-edge run` | Run video pipeline, YOLO inference, MQTT telemetry |
+| `vclane-edge register` | Provision device with backend API |
+| `vclane-edge deregister` | Remove device from backend |
+
+All options are documented inline with `--help`.
+
+### Configuration
+
+Settings are resolved from two sources (highest priority wins):
+
+1. **JSON config file** — passed via `--config / -c` (e.g. `vclane-edge run --config config.json`)
+2. **CLI flags** — `--device-id`, `--mqtt-host`, etc.
+
+Example `config.json`:
+
+```json
+{
+  "device_id": "intersection-01",
+  "device_secret": "…from registration…",
+  "mqtt_host": "10.0.0.5",
+  "mqtt_port": 8883,
+  "mqtt_tls": true,
+  "api_url": "https://vclane.example.com"
+}
+```
+
+### Video Pipeline Modes
+
+| Mode | Description |
+|------|-------------|
+| `opencv+ffmpeg` (default) | OpenCV capture → YOLO detect → FFmpeg stdin → RTSP |
+| `direct-ffmpeg` | Source → FFmpeg → RTSP (no OpenCV/YOLO, pure passthrough) |
+| `opencv+gstreamer` | OpenCV capture → YOLO → GStreamer → RTSP (falls back to opencv+ffmpeg) |
+
+### Registration Flow
+
+1. Admin runs `vclane-edge register --api-url <url>`
+2. Prompts for Firebase email/password (or sets `VCLANE_ADMIN_EMAIL` / `VCLANE_ADMIN_PASSWORD`)
+3. `POST /api/auth/login` → JWT
+4. `POST /api/devices` → receives `{deviceId, deviceSecret, rtspUrl}`
+5. With `--out <path>`, credentials saved as JSON; otherwise printed to stdout
+
+Auto-registration at `vclane-edge run` start occurs when `device_id` or `device_secret` are empty (or `force_register` is `true`). Registered credentials are used in-memory for the session — the config file is not modified.
+
 ## Technology Stack
 
 | Component                   | Technology                     |
@@ -104,7 +175,9 @@ Each edge device periodically reports:
 | MQTT Communication          | Eclipse Paho MQTT Client       |
 | Communication Protocol      | MQTT over TLS                  |
 | Video Streaming             | RTSP Publisher                 |
-| System Monitoring           | psutil / Linux Metrics         |
+| CLI Framework               | Typer                          |
+| Config Management           | Pydantic                       |
+| Package Manager             | uv                             |
 | Containerization (Optional) | Docker                         |
 
 ## Key Features
