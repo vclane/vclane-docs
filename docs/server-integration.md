@@ -14,7 +14,7 @@ graph TB
         Caddy["Reverse Proxy — Caddy<br/>(TLS termination)"]
         Backend["Backend API — FastAPI<br/>(Auth / Commands / Telemetry)"]
         Media["Media Server — MediaMTX<br/>(RTSP / WebRTC relay)"]
-        MQTT["MQTT Broker — Mosquitto<br/>(TLS + password auth)"]
+        MQTT["MQTT Broker — Mosquitto<br/>(TLS + Dynamic Security)"]
 
         Caddy -->|"/api/* /ws/* /health"| Backend
         Caddy -->|"/stream/*"| Media
@@ -118,11 +118,12 @@ The backend connects to Mosquitto as an internal MQTT client to receive telemetr
 
 - Client ID: `vclane-backend`
 - Host: `mosquitto:1883` (internal Docker network, no TLS)
-- No password — the backend user is authorized via ACL
+- Password: `vclane-backend` — matches the admin client bootstrapped in the Dynamic Security config
+- The `admin` role grants access to all traffic topics plus `$CONTROL/dynamic-security/#` for Dynamic Security administration
 
 ### Subscriptions
 
-On connect, the backend subscribes to four wildcard topics:
+On connect, the backend subscribes to four wildcard topics plus the Dynamic Security response topic:
 
 | Topic Pattern | Handler | Destination |
 |---|---|---|
@@ -151,7 +152,7 @@ All inbound handlers parse the topic to extract `deviceId` (third segment) and r
 2. Backend generates a device secret: `vcl-{32 hex chars}`.
 3. Secret is bcrypt-hashed and stored in Firestore at `devices/{deviceId}.deviceSecretHash`.
 4. RTSP URL is constructed: `rtsp://{deviceId}@mediamtx:8554/{deviceId}`.
-5. Mosquitto user is created via `mosquitto_passwd -b <passwd_file> <deviceId> <secret>`.
+5. Mosquitto user is created via two Dynamic Security RPCs: `publish_dynsec("createClient", ...)` to create the MQTT client, then `publish_dynsec("addClientRole", ...)` to assign the `device` role.
 6. Response returns `{deviceId, deviceSecret, rtspUrl}` — the plaintext secret is only returned once.
 
 ### Device Authentication (End-to-End)
@@ -165,8 +166,8 @@ sequenceDiagram
     participant DB as Firestore
 
     Edge->>+MQTT: MQTT connect<br/>(deviceId, deviceSecret)
-    MQTT->>MQTT: verify via mosquitto_passwd file
-    MQTT-->>-Edge: ACL granted<br/>(own device topics + group topics)
+    MQTT->>MQTT: verify via Dynamic Security Plugin
+    MQTT-->>-Edge: Role-based ACL granted<br/>(own device topics + group topics)
 
     Edge->>+MTX: RTSP publish<br/>rtsp://deviceId@mediamtx:8554/deviceId
     MTX->>+API: GET /api/mediamtx/auth<br/>?user=deviceId&password=deviceSecret
@@ -232,24 +233,51 @@ Edge devices in the group respond on `traffic/group/{groupId}/prepare-response`.
 | Backend → Device | `traffic/device/{id}/commands` | Backend | Edge device | `{"command": str, "payload": {}}` |
 | Backend → Devices | `traffic/group/{id}/prepare` | Backend | Edge devices in group | `{"deviceIds": [str]}` |
 
-### Mosquitto ACL
+### Mosquitto Dynamic Security
 
-The ACL file controls topic-level access:
+Mosquitto uses the **Dynamic Security Plugin** instead of static ACL files. Two roles are bootstrapped at image build:
 
+- **`admin`** — assigned to `vclane-backend`, grants read/write on all `traffic/device/+/#` and `traffic/group/+/#` topics plus CONTROL topics.
+- **`device`** — applied per device, grants read/write on `traffic/device/%u/#` and `traffic/group/+/#` topics.
+
+#### RPC Format
+
+Dynamic Security commands are sent as MQTT RPCs on `$CONTROL/dynamic-security/v1`. The payload must wrap the command in a `commands` array:
+
+```json
+{
+  "commands": [
+    {
+      "command": "createClient",
+      "username": "intersection-01",
+      "password": "vcl-abc123...",
+      "textname": "intersection-01"
+    }
+  ]
+}
 ```
-# provisions/mosquitto/acl.dev.conf
 
-user vclane-backend
-  pattern rw traffic/device/+/#
-  pattern rw traffic/group/+/#
+A single `"command"` key at the top level (without the `commands` array) will cause an `"Unknown command"` / `"Invalid/missing commands"` error on Mosquitto 2.1.2.
 
-pattern read write traffic/device/%u/#
-pattern read write traffic/group/+/#
+Success responses omit both `"success"` and `"error"` keys — only the response fields (e.g., `"clients"` for `listClients`). Failure responses include an `"error"` key.
+
+#### Provisioning Flow
+
+When a device is provisioned via `POST /api/devices`, the backend sends **two** RPCs:
+1. `createClient` — registers the MQTT client with username/password
+2. `addClientRole` — assigns the `device` role to the newly created client
+
+On deprovisioning (`DELETE /api/devices/{id}`), a single `deleteClient` RPC removes the client and its role assignments.
+
+#### Docker Volume Persistence
+
+The `mosquitto_data` Docker volume at `/mosquitto/data` in the container persists the Dynamic Security database file (`dynamic-security.json`) across container restarts. To apply a fresh image config (e.g., after rebuilding with new roles/ACLs), the volume must be deleted:
+
+```bash
+docker compose down mosquitto
+docker volume rm vclane-server_mosquitto_data
+docker compose up -d mosquitto
 ```
-
-- `vclane-backend` (the backend's MQTT client) has read/write on all device and group topics.
-- `%u` in the pattern line expands to the connecting device's username (= `deviceId`), scoping each device to its own topics.
-- All devices can read/write group topics for synchronization.
 
 ---
 
@@ -257,8 +285,8 @@ pattern read write traffic/group/+/#
 
 | Method | Path | Auth | Purpose | Side-Effect |
 |---|---|---|---|---|
-| `POST` | `/api/devices` | JWT | Create device + provision secret | `add_mosquitto_user()` via shell |
-| `DELETE` | `/api/devices/{id}` | JWT | Delete device | `remove_mosquitto_user()` via shell |
+| `POST` | `/api/devices` | JWT | Create device + provision secret | `add_mosquitto_user()` via Dynamic Security RPC |
+| `DELETE` | `/api/devices/{id}` | JWT | Delete device | `remove_mosquitto_user()` via Dynamic Security RPC |
 | `POST` | `/api/devices/{id}/commands` | JWT | Send arbitrary command | MQTT publish to `traffic/device/{id}/commands` |
 | `POST` | `/api/devices/{id}/signal` | JWT | Override traffic signal | MQTT publish + Firestore write |
 | `POST` | `/api/groups/{id}/sync` | JWT | Trigger group prepare | MQTT publish to `traffic/group/{id}/prepare` |

@@ -8,7 +8,7 @@ The VC-LANE server uses **Mosquitto** as its MQTT broker, running inside the Doc
 
 - Internal port: `1883` (no TLS — backend and broker are on the same Docker network)
 - External port (when enabled): `8883` (TLS, for edge devices)
-- Authentication: password file managed via `mosquitto_passwd`
+- Authentication: Mosquitto Dynamic Security Plugin
 
 ## Topic Structure
 
@@ -38,28 +38,49 @@ traffic/
 | Backend → Device | `traffic/device/{id}/commands` | Backend | Edge device | `{"command": str, "payload": {}}` |
 | Backend → Devices | `traffic/group/{id}/prepare` | Backend | Edge devices in group | `{"deviceIds": [str]}` |
 
-## Mosquitto ACL
+## Mosquitto Dynamic Security
 
-The ACL file controls topic-level access for each connecting client:
+Mosquitto uses the **Dynamic Security Plugin**, which manages clients, roles, and ACLs via MQTT RPC on `$CONTROL/dynamic-security/v1`.
 
+### RPC Format
+
+Commands must be wrapped in a `commands` array:
+
+```json
+{
+  "commands": [
+    {
+      "command": "createClient",
+      "username": "intersection-01",
+      "password": "vcl-abc123...",
+      "textname": "intersection-01"
+    }
+  ]
+}
 ```
-user vclane-backend
-  pattern rw traffic/device/+/#
-  pattern rw traffic/group/+/#
 
-pattern read write traffic/device/%u/#
-pattern read write traffic/group/+/#
-```
+A top-level `"command"` key (without the `commands` array) causes an `"Unknown command"` error on Mosquitto 2.1.2. Success responses omit both `"success"` and `"error"` keys — failure responses include an `"error"` key.
 
-- `vclane-backend` (the backend's internal MQTT client) has read/write on all device and group topics.
-- `%u` expands to the connecting device's username (= `deviceId`), scoping each device to its own topics.
-- All devices can read/write group topics for synchronization.
+### Roles
+
+Two roles are defined at image build time:
+
+- **`admin`** — assigned to `vclane-backend`, grants read/write on all `traffic/device/+/#` and `traffic/group/+/#` topics plus CONTROL topics.
+- **`device`** — applied per device, grants read/write on `traffic/device/%u/#` and `traffic/group/+/#` topics (`%u` expands to the connecting device's username).
+
+### Provisioning
+
+When a new device is provisioned via `POST /api/devices`, the backend sends **two** RPCs:
+1. `createClient` — registers the MQTT client with username/password
+2. `addClientRole` — assigns the `device` role
+
+On deprovisioning (`DELETE /api/devices/{id}`), a `deleteClient` RPC removes the client and its role assignments.
 
 ## Security
 
 - MQTT over TLS on the external listener (port 8883) for edge device connections
-- Username/password authentication via `mosquitto_passwd` file
-- Topic-based access control via ACL
+- Username/password authentication via Mosquitto Dynamic Security Plugin
+- Default ACL set to `deny`; role-based ACLs grant only required topic access
 - Devices are provisioned with a unique device secret used as both MQTT and RTSP password
 
 ## Technology Stack
@@ -69,8 +90,8 @@ pattern read write traffic/group/+/#
 | Protocol       | MQTT v5                            |
 | Encryption     | TLS (external)                     |
 | MQTT Broker    | Mosquitto                          |
-| Authentication | Password file + `mosquitto_passwd` |
-| Authorization  | Topic-based ACL                    |
+| Authentication | Mosquitto Dynamic Security Plugin |
+| Authorization  | Role-based ACL (Dynamic Security) |
 | Message Format | JSON                               |
 
 ## Key Features
