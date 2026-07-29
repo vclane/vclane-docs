@@ -17,3 +17,4 @@ The system follows an **edge computing architecture** — every traffic intersec
 | 7 | [Mobile App](mobile-app.md) | Flutter application — auth, dashboard, video playback, device control |
 | 8 | [Features](features.md) | System-wide key features |
 | 9 | [Architectural Advantages](architectural-advantages.md) | Low latency, scalability, resilience, security |
+| 10 | [Database](database.md) | Firestore and RTDB schemas — collections, paths, and field definitions |

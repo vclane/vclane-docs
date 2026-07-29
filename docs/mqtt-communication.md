@@ -31,12 +31,15 @@ traffic/
 
 | Direction | Topic | Publisher | Consumer | Payload |
 |---|---|---|---|---|
-| Device → Backend | `traffic/device/{id}/telemetry` | Edge device | Backend (→RTDB) | Arbitrary JSON |
-| Device → Backend | `traffic/device/{id}/heartbeat` | Edge device | Backend (→RTDB) | Arbitrary JSON |
+| Device → Backend | `traffic/device/{id}/telemetry` | Edge device | Backend (→RTDB) | Arbitrary JSON — `online: true` and `lastSeen` injected by backend |
+| Device → Backend | `traffic/device/{id}/heartbeat` | Edge device | Backend (→RTDB) | Same as telemetry |
+| Device → Backend | `traffic/device/{id}/goodbye` | Edge device (or LWT) | Backend (→RTDB) | Arbitrary JSON — sets `online: false` |
 | Device → Backend | `traffic/device/{id}/acknowledgements` | Edge device | Backend (logged) | Arbitrary JSON |
 | Device → Backend | `traffic/group/{id}/prepare-response` | Edge device | Backend (unhandled) | Arbitrary JSON |
 | Backend → Device | `traffic/device/{id}/commands` | Backend | Edge device | `{"command": str, "payload": {}}` |
 | Backend → Devices | `traffic/group/{id}/prepare` | Backend | Edge devices in group | `{"deviceIds": [str]}` |
+
+The `online` field in RTDB at `/telemetry/{deviceId}` is set to `true` on every heartbeat or telemetry. It is set to `false` by a goodbye message (graceful shutdown), a Last Will & Testament (crash), or a background timeout checker (stale detection).
 
 ## Mosquitto Dynamic Security
 
