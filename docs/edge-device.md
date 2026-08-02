@@ -61,6 +61,7 @@ The edge device maintains a persistent MQTT connection to the backend when inter
 Responsibilities:
 
 - Publish AI traffic telemetry (vehicle counts, lane occupancy, congestion levels)
+- Report the currently actuated traffic light phase (from LoRa) or caution state
 - Send heartbeat updates and connection status
 - Report device health and camera status
 
@@ -71,6 +72,7 @@ Example telemetry:
   "deviceId": "intersection-01",
   "vehicleCount": 35,
   "trafficDensity": "HIGH",
+  "currentTrafficLightSignal": "GREEN",
   "timestamp": "2026-07-24T10:00:00Z"
 }
 ```

@@ -5,7 +5,7 @@ MQTT provides the real-time communication channel between the backend, the ESP-3
 ## Responsibilities
 
 - Deliver timing schedules and manual overrides to ESP-32 Traffic Controllers
-- Receive AI traffic telemetry from Raspberry Pi Edge Devices (vehicle counts, congestion status)
+- Receive AI traffic telemetry from Raspberry Pi Edge Devices (vehicle counts, congestion status, active traffic light phase)
 - Receive fallback traffic light phase telemetry from ESP-32 Traffic Controllers when edge devices are offline
 - Receive connection heartbeats and device health stats from all devices
 - Maintain persistent, low-latency connections over TLS
@@ -62,6 +62,7 @@ traffic/
   "deviceId": "intersection-01",
   "vehicleCount": 35,
   "trafficDensity": "HIGH",
+  "currentTrafficLightSignal": "GREEN",
   "timestamp": "2026-07-24T10:00:00Z"
 }
 ```
