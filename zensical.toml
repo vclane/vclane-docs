@@ -14,11 +14,13 @@ nav = [
   { "Documentation" = [
     { "Architecture" = "architecture.md" },
     { "Edge Device" = "edge-device.md" },
+    { "Traffic Controller" = "traffic-controller.md" },
     { "Backend API" = "backend-api.md" },
     { "MQTT Communication" = "mqtt-communication.md" },
     { "Media Server" = "media-server.md" },
     { "Mobile App" = "mobile-app.md" },
   ]},
+  { "Changelog" = "changelog.md" },
 ]
 
 [project.theme]

@@ -44,28 +44,24 @@ Examples:
 - Queue length estimation
 - Traffic congestion detection
 
-## Local Decision Making
+## Local Decision Making and Actuation
 
-The Raspberry Pi can perform immediate actions without waiting for the backend.
+Under the grouped architecture, the Raspberry Pi Edge Device functions as the physical actuator for the traffic lights at its intersection. Rather than executing a standalone schedule or receiving direct signal overrides from the backend, it delegates coordination to the group's ESP-32 Traffic Controller.
 
-Examples:
-
-- Detect abnormal traffic conditions
-- Apply fallback traffic rules
-- Continue operation during temporary network outages
-- Execute previously received traffic schedules
+Key behaviors:
+- **LoRa Packet Reception:** The Raspberry Pi continuously listens for LoRa broadcast signals containing the target active phases.
+- **Relay Actuation:** It parses the received command (e.g., active phase, green-yellow-red light configurations) and controls the physical relays to update the signal lamps.
+- **Resilient Fallback:** If the LoRa broadcast signal is lost (e.g., ESP-32 hardware failure), the Raspberry Pi falls back to a pre-programmed local safety routine (such as flashing yellow for caution) to prevent unsafe signal states.
 
 ## Backend Communication
 
-The edge device maintains a persistent MQTT connection.
+The edge device maintains a persistent MQTT connection to the backend when internet is available.
 
 Responsibilities:
 
-- Publish telemetry
-- Send heartbeat updates
-- Report device health
-- Receive commands
-- Send execution acknowledgements
+- Publish AI traffic telemetry (vehicle counts, lane occupancy, congestion levels)
+- Send heartbeat updates and connection status
+- Report device health and camera status
 
 Example telemetry:
 
@@ -80,15 +76,14 @@ Example telemetry:
 
 ## Device Monitoring
 
-Each edge device periodically reports:
+Each edge device periodically reports its system and operational status to the backend (excluding CPU/Memory metrics):
 
 - Online/offline state
-- CPU usage
-- Memory usage
 - Storage availability
 - Network connectivity
 - Camera status
 - AI processing status
+- LoRa receiver status (signal strength, packet loss)
 
 ## Technology Stack
 
@@ -101,10 +96,12 @@ Each edge device periodically reports:
 | AI Detection Model          | YOLO Object Detection          |
 | AI Runtime                  | TensorFlow Lite / ONNX Runtime |
 | Camera Interface            | CSI Camera / USB Camera        |
+| Local Wireless Receiver     | LoRa SX1276 / SX1278 Module    |
+| Local Control Protocol      | SPI (Pi to LoRa) / LoRa Radio  |
+| Actuator Interface          | GPIO-controlled Relay Board    |
 | MQTT Communication          | Eclipse Paho MQTT Client       |
-| Communication Protocol      | MQTT over TLS                  |
+| Communication Protocol      | MQTT over TLS (to Backend)     |
 | Video Streaming             | RTSP Publisher                 |
-| System Monitoring           | psutil / Linux Metrics         |
 | Containerization (Optional) | Docker                         |
 
 ## Key Features
@@ -113,8 +110,10 @@ Each edge device periodically reports:
 
 **Local Edge Processing** — Performs AI inference locally, reduces bandwidth consumption, provides faster response time, minimizes cloud processing requirements.
 
-**Local Decision Making** — Executes traffic rules during network interruptions, performs fallback traffic control, maintains operation during backend downtime.
+**LoRa-Driven Signal Actuation** — Receives synchronized traffic light phase commands from the group's ESP-32 Traffic Controller via LoRa, driving the physical light relays.
 
-**Device Monitoring** — CPU utilization, memory usage, storage availability, network connectivity, camera status, AI processing status.
+**Fault Tolerant Safety Fallback** — Reverts to flashing yellow/local caution mode if LoRa control signals are lost or corrupted, ensuring driver safety.
 
-**Secure Backend Communication** — Device heartbeat reporting, telemetry publishing, remote command execution, command acknowledgements.
+**Device Monitoring** — Storage availability, network connectivity, camera status, AI processing status, and LoRa receiver signal quality.
+
+**Secure Backend Communication** — Device heartbeat reporting, telemetry publishing, remote configuration updates.
