@@ -100,7 +100,7 @@ vclane-edge/
 │   ├── mqtt.py              # MQTT client (publish/subscribe)
 │   ├── video.py             # Video pipeline (3 modes)
 │   ├── yolo.py              # YOLO detection wrapper
-│   ├── sensors.py           # Mock telemetry state
+│   ├── telemetry.py         # Mock telemetry state
 │   └── registration.py      # Provisioning flow
 ├── pyproject.toml            # uv-managed deps
 ├── Dockerfile                # Multi-stage container
