@@ -123,12 +123,13 @@ The backend connects to Mosquitto as an internal MQTT client to receive telemetr
 
 ### Subscriptions
 
-On connect, the backend subscribes to four wildcard topics plus the Dynamic Security response topic:
+On connect, the backend subscribes to five wildcard topics plus the Dynamic Security response topic:
 
 | Topic Pattern | Handler | Destination |
 |---|---|---|
-| `traffic/device/+/telemetry` | `_handle_telemetry` | Writes to RTDB at `/telemetry/{deviceId}` via `ref.set(payload)` |
-| `traffic/device/+/heartbeat` | `_handle_heartbeat` | Writes to RTDB at `/telemetry/{deviceId}` (same as telemetry) |
+| `traffic/device/+/telemetry` | `_handle_telemetry` | Writes to RTDB at `/telemetry/{deviceId}` — injects `online: true` and `lastSeen` |
+| `traffic/device/+/heartbeat` | `_handle_heartbeat` | Same as telemetry |
+| `traffic/device/+/goodbye` | `_handle_goodbye` | Sets `online: false` on `/telemetry/{deviceId}` |
 | `traffic/device/+/acknowledgements` | `_handle_ack` | Logs the payload — no persistence or callback |
 | `traffic/group/+/prepare-response` | _(no handler)_ | Subscribed but not processed |
 

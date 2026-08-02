@@ -140,7 +140,7 @@ No `autoDispose` is used — all providers are global singletons for the app lif
 | `Telemetry` | vehicleCount, currentTrafficLightSignal, timestamp |
 | `SignalOverride` | deviceId, targetSignal, requestedAt |
 
-> **Note:** `lastSeen` was previously stored in Firestore as a `Timestamp` on the Device document. It has been removed from Firestore. The "Last seen" timestamp is now derived from the `timestamp` field in `Telemetry`, which is stored in the Realtime Database at `telemetry/{deviceId}`. This avoids excessive Firestore writes from frequent heartbeat updates.
+> **Note:** Online/offline state and last-seen timestamps are tracked in the Realtime Database at `/telemetry/{deviceId}`, not in Firestore. The `online` field is set to `true` on every heartbeat or telemetry, and `false` via goodbye message, LWT, or background timeout checker. This avoids excessive Firestore writes from frequent updates.
 
 ## Implementation Notes
 
