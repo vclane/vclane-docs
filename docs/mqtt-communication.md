@@ -1,4 +1,4 @@
-# MQTT Communication Layer
+# MQTT Communication
 
 MQTT provides the real-time communication channel between the backend, the ESP-32 Traffic Controllers, and the Raspberry Pi Edge Devices, enabling bidirectional messaging.
 
@@ -44,14 +44,14 @@ traffic/
 
 ## Technology Stack
 
-| Component      | Technology                                  |
-| -------------- | ------------------------------------------- |
-| Protocol       | MQTT v5                                     |
-| Encryption     | TLS                                         |
-| MQTT Broker    | EMQX / Mosquitto                            |
-| Authentication | X.509 Certificate / Username Authentication |
-| Authorization  | Topic-Based Access Control                  |
-| Message Format | JSON                                        |
+| Component      | Technology                        |
+| -------------- | --------------------------------- |
+| Protocol       | MQTT v5                           |
+| Encryption     | TLS (external)                    |
+| MQTT Broker    | Mosquitto                         |
+| Authentication | Mosquitto Dynamic Security Plugin |
+| Authorization  | Role-based ACL (Dynamic Security) |
+| Message Format | JSON                              |
 
 ## Key Features
 

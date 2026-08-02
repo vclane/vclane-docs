@@ -70,7 +70,7 @@ lib/
 | Routing                | go_router                     |
 | Authentication        | Firebase Authentication       |
 | Database               | Cloud Firestore               |
-| Real-Time Sensor Data  | Firebase Realtime Database     |
+| Real-Time Telemetry    | Firebase Realtime Database     |
 | File Storage           | Firebase Storage              |
 | HTTP Client            | Dio                           |
 | Video Playback         | media_kit (RTSP/WebRTC)       |
@@ -84,7 +84,7 @@ lib/
 |--------------------|------------------------|---------|
 | LoginScreen        | `/login`               | Email/password sign-in with VC-LANE branding |
 | DashboardScreen    | `/dashboard`           | Device list grouped by status, quick stats, group breakdown |
-| DeviceDetailScreen | `/devices/:id`         | Full device info, sensor readings, stream preview, signal override |
+| DeviceDetailScreen | `/devices/:id`         | Full device info, telemetry, stream preview, signal override |
 | LiveStreamScreen   | `/devices/:id/stream`  | Full-screen RTSP video playback |
 | ProfileScreen      | `/profile`             | User profile, preferences, app info, sign out |
 | EditProfileScreen  | `/profile/edit`        | Edit display name, photo, address, phone |
@@ -101,7 +101,7 @@ Dio HTTP (backend API) ──► ApiDataSource ──► Repository ──► Fu
     (one-shot requests)                                           (ref.watch)
 ```
 
-- **Real-time data** (devices, groups, users, sensor readings) flows through `StreamProvider` from Firestore/RTDB → widgets update automatically
+- **Real-time data** (devices, groups, users, telemetry) flows through `StreamProvider` from Firestore/RTDB → widgets update automatically
 - **One-shot requests** (stream URLs) use `FutureProvider.family` via the Dio-based API client
 - **Derived state** (grouped device lists, effective readings with overrides) uses plain `Provider<T>`
 
@@ -124,7 +124,7 @@ All providers are handwritten (no code generation). Key patterns:
 | Pattern | Example |
 |---------|---------|
 | `StreamProvider` | Real-time device list, group list |
-| `StreamProvider.family` | Single device by ID, sensor readings by device |
+| `StreamProvider.family` | Single device by ID, telemetry by device |
 | `FutureProvider.family` | Stream URL by device ID |
 | `Provider<T>` (derived) | Auth state, grouped devices, effective readings |
 
@@ -137,8 +137,10 @@ No `autoDispose` is used — all providers are global singletons for the app lif
 | `User` | id, email, displayName, role ('operator') |
 | `Device` | id, name, location, status (online/offline/warning), firmwareVersion, rtspUrl |
 | `Group` | id, name, description, location |
-| `SensorReading` | vehicleCount, currentTrafficLightSignal, timestamp |
+| `Telemetry` | vehicleCount, currentTrafficLightSignal, timestamp |
 | `SignalOverride` | deviceId, targetSignal, requestedAt |
+
+> **Note:** Online/offline state and last-seen timestamps are tracked in the Realtime Database at `/telemetry/{deviceId}`, not in Firestore. The `online` field is set to `true` on every heartbeat or telemetry, and `false` via goodbye message, LWT, or background timeout checker. This avoids excessive Firestore writes from frequent updates.
 
 ## Implementation Notes
 
