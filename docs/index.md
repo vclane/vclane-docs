@@ -1,6 +1,6 @@
-# VC-LANE Documentation
+# VCLane Documentation
 
-**VC-LANE** (Adaptive Traffic Monitoring System) is a distributed intelligent traffic monitoring and management platform providing real-time traffic observation, live video streaming, AI-based traffic analysis, device monitoring, and coordinated traffic signal control across multiple intersections.
+**VCLane** (Adaptive Traffic Monitoring System) is a distributed intelligent traffic monitoring and management platform providing real-time traffic observation, live video streaming, AI-based traffic analysis, device monitoring, and coordinated traffic signal control across multiple intersections.
 
 The system follows an **edge computing architecture**, where every traffic intersection operates as an independent AI-enabled Raspberry Pi edge device for local camera processing and traffic light actuation. Intersections are grouped, and each group is coordinated locally by an **ESP-32 Traffic Controller** via **LoRa** wireless broadcasts, ensuring fault-tolerant signaling even during internet outages. Remote management and schedules are handled by the backend over MQTT over TLS.
 

@@ -1,6 +1,6 @@
 # Server Integration
 
-The VC-LANE server is a Docker Compose stack of four services — Caddy, Backend (FastAPI), MediaMTX, and Mosquitto — that work together to manage edge devices, relay video streams, and handle real-time communication.
+The VCLane server is a Docker Compose stack of four services — Caddy, Backend (FastAPI), MediaMTX, and Mosquitto — that work together to manage edge devices, relay video streams, and handle real-time communication.
 
 ## Backend API
 
@@ -10,7 +10,7 @@ The backend acts as the centralized management and coordination layer between us
 
 ```mermaid
 graph TB
-    subgraph Server["VC-LANE Server (Docker Compose)"]
+    subgraph Server["VCLane Server (Docker Compose)"]
         Caddy["Reverse Proxy — Caddy<br/>(TLS termination)"]
         Backend["Backend API — FastAPI<br/>(Auth / Commands / Telemetry)"]
         Media["Media Server — MediaMTX<br/>(RTSP / WebRTC relay)"]
@@ -42,21 +42,21 @@ graph TB
 
 ### Technology Stack
 
-| Component               | Technology                          |
-| ----------------------- | ----------------------------------- |
-| Programming Language    | Python                              |
-| Backend Framework       | FastAPI                             |
-| API Architecture        | REST API + WebSocket                |
-| MQTT Integration        | Paho MQTT Client                    |
-| MQTT Broker             | Mosquitto                           |
-| Authentication          | Firebase Admin SDK + JWT + bcrypt   |
-| Database                | Firestore                           |
-| Real-Time Telemetry     | Realtime Database                   |
-| Media Server            | MediaMTX (RTSP / WebRTC)            |
-| Reverse Proxy           | Caddy                               |
-| API Documentation       | OpenAPI / Swagger                   |
-| Containerization        | Docker + Docker Compose             |
-| Deployment              | Linux Server / Cloud Infrastructure |
+| Component            | Technology                          |
+| -------------------- | ----------------------------------- |
+| Programming Language | Python                              |
+| Backend Framework    | FastAPI                             |
+| API Architecture     | REST API + WebSocket                |
+| MQTT Integration     | Paho MQTT Client                    |
+| MQTT Broker          | Mosquitto                           |
+| Authentication       | Firebase Admin SDK + JWT + bcrypt   |
+| Database             | Firestore                           |
+| Real-Time Telemetry  | Realtime Database                   |
+| Media Server         | MediaMTX (RTSP / WebRTC)            |
+| Reverse Proxy        | Caddy                               |
+| API Documentation    | OpenAPI / Swagger                   |
+| Containerization     | Docker + Docker Compose             |
+| Deployment           | Linux Server / Cloud Infrastructure |
 
 ### Key Features
 
@@ -125,23 +125,23 @@ The backend connects to Mosquitto as an internal MQTT client to receive telemetr
 
 On connect, the backend subscribes to five wildcard topics plus the Dynamic Security response topic:
 
-| Topic Pattern | Handler | Destination |
-|---|---|---|
-| `traffic/device/+/telemetry` | `_handle_telemetry` | Writes to RTDB at `/telemetry/{deviceId}` — injects `online: true` and `lastSeen` |
-| `traffic/device/+/heartbeat` | `_handle_heartbeat` | Same as telemetry |
-| `traffic/device/+/goodbye` | `_handle_goodbye` | Sets `online: false` on `/telemetry/{deviceId}` |
-| `traffic/device/+/acknowledgements` | `_handle_ack` | Logs the payload — no persistence or callback |
-| `traffic/group/+/prepare-response` | _(no handler)_ | Subscribed but not processed |
+| Topic Pattern                       | Handler             | Destination                                                                       |
+| ----------------------------------- | ------------------- | --------------------------------------------------------------------------------- |
+| `traffic/device/+/telemetry`        | `_handle_telemetry` | Writes to RTDB at `/telemetry/{deviceId}` — injects `online: true` and `lastSeen` |
+| `traffic/device/+/heartbeat`        | `_handle_heartbeat` | Same as telemetry                                                                 |
+| `traffic/device/+/goodbye`          | `_handle_goodbye`   | Sets `online: false` on `/telemetry/{deviceId}`                                   |
+| `traffic/device/+/acknowledgements` | `_handle_ack`       | Logs the payload — no persistence or callback                                     |
+| `traffic/group/+/prepare-response`  | _(no handler)_      | Subscribed but not processed                                                      |
 
 All inbound handlers parse the topic to extract `deviceId` (third segment) and route accordingly.
 
 ### Publish (Outbound)
 
-| Trigger | Topic | Payload |
-|---|---|---|
-| `POST /api/devices/{id}/commands` | `traffic/device/{id}/commands` | `{"command": "...", "payload": {...}}` |
-| `POST /api/devices/{id}/signal` | `traffic/device/{id}/commands` | `{"command": "signal_override", "payload": {"targetSignal": "..."}}` |
-| `POST /api/groups/{id}/sync` | `traffic/group/{id}/prepare` | `{"deviceIds": ["id1", "id2", ...]}` |
+| Trigger                           | Topic                          | Payload                                                              |
+| --------------------------------- | ------------------------------ | -------------------------------------------------------------------- |
+| `POST /api/devices/{id}/commands` | `traffic/device/{id}/commands` | `{"command": "...", "payload": {...}}`                               |
+| `POST /api/devices/{id}/signal`   | `traffic/device/{id}/commands` | `{"command": "signal_override", "payload": {"targetSignal": "..."}}` |
+| `POST /api/groups/{id}/sync`      | `traffic/group/{id}/prepare`   | `{"deviceIds": ["id1", "id2", ...]}`                                 |
 
 ---
 
@@ -225,14 +225,14 @@ Edge devices in the group respond on `traffic/group/{groupId}/prepare-response`.
 
 ## MQTT Topic Reference
 
-| Direction | Topic | Publisher | Consumer | Payload |
-|---|---|---|---|---|
-| Device → Backend | `traffic/device/{id}/telemetry` | Edge device | Backend (→RTDB) | Arbitrary JSON |
-| Device → Backend | `traffic/device/{id}/heartbeat` | Edge device | Backend (→RTDB) | Arbitrary JSON |
-| Device → Backend | `traffic/device/{id}/acknowledgements` | Edge device | Backend (logged) | Arbitrary JSON |
-| Device → Backend | `traffic/group/{id}/prepare-response` | Edge device | Backend (unhandled) | Arbitrary JSON |
-| Backend → Device | `traffic/device/{id}/commands` | Backend | Edge device | `{"command": str, "payload": {}}` |
-| Backend → Devices | `traffic/group/{id}/prepare` | Backend | Edge devices in group | `{"deviceIds": [str]}` |
+| Direction         | Topic                                  | Publisher   | Consumer              | Payload                           |
+| ----------------- | -------------------------------------- | ----------- | --------------------- | --------------------------------- |
+| Device → Backend  | `traffic/device/{id}/telemetry`        | Edge device | Backend (→RTDB)       | Arbitrary JSON                    |
+| Device → Backend  | `traffic/device/{id}/heartbeat`        | Edge device | Backend (→RTDB)       | Arbitrary JSON                    |
+| Device → Backend  | `traffic/device/{id}/acknowledgements` | Edge device | Backend (logged)      | Arbitrary JSON                    |
+| Device → Backend  | `traffic/group/{id}/prepare-response`  | Edge device | Backend (unhandled)   | Arbitrary JSON                    |
+| Backend → Device  | `traffic/device/{id}/commands`         | Backend     | Edge device           | `{"command": str, "payload": {}}` |
+| Backend → Devices | `traffic/group/{id}/prepare`           | Backend     | Edge devices in group | `{"deviceIds": [str]}`            |
 
 ### Mosquitto Dynamic Security
 
@@ -265,6 +265,7 @@ Success responses omit both `"success"` and `"error"` keys — only the response
 #### Provisioning Flow
 
 When a device is provisioned via `POST /api/devices`, the backend sends **two** RPCs:
+
 1. `createClient` — registers the MQTT client with username/password
 2. `addClientRole` — assigns the `device` role to the newly created client
 
@@ -284,11 +285,11 @@ docker compose up -d mosquitto
 
 ## Integration API Endpoints
 
-| Method | Path | Auth | Purpose | Side-Effect |
-|---|---|---|---|---|
-| `POST` | `/api/devices` | JWT | Create device + provision secret | `add_mosquitto_user()` via Dynamic Security RPC |
-| `DELETE` | `/api/devices/{id}` | JWT | Delete device | `remove_mosquitto_user()` via Dynamic Security RPC |
-| `POST` | `/api/devices/{id}/commands` | JWT | Send arbitrary command | MQTT publish to `traffic/device/{id}/commands` |
-| `POST` | `/api/devices/{id}/signal` | JWT | Override traffic signal | MQTT publish + Firestore write |
-| `POST` | `/api/groups/{id}/sync` | JWT | Trigger group prepare | MQTT publish to `traffic/group/{id}/prepare` |
-| `GET` | `/api/mediamtx/auth` | _(none)_ | MediaMTX auth callback | Reads Firestore, bcrypt verify |
+| Method   | Path                         | Auth     | Purpose                          | Side-Effect                                        |
+| -------- | ---------------------------- | -------- | -------------------------------- | -------------------------------------------------- |
+| `POST`   | `/api/devices`               | JWT      | Create device + provision secret | `add_mosquitto_user()` via Dynamic Security RPC    |
+| `DELETE` | `/api/devices/{id}`          | JWT      | Delete device                    | `remove_mosquitto_user()` via Dynamic Security RPC |
+| `POST`   | `/api/devices/{id}/commands` | JWT      | Send arbitrary command           | MQTT publish to `traffic/device/{id}/commands`     |
+| `POST`   | `/api/devices/{id}/signal`   | JWT      | Override traffic signal          | MQTT publish + Firestore write                     |
+| `POST`   | `/api/groups/{id}/sync`      | JWT      | Trigger group prepare            | MQTT publish to `traffic/group/{id}/prepare`       |
+| `GET`    | `/api/mediamtx/auth`         | _(none)_ | MediaMTX auth callback           | Reads Firestore, bcrypt verify                     |

@@ -6,7 +6,7 @@ The backend acts as the centralized management and coordination layer between us
 
 ```mermaid
 graph TB
-    subgraph Server["VC-LANE Server (Docker Compose)"]
+    subgraph Server["VCLane Server (Docker Compose)"]
         Caddy["Reverse Proxy — Caddy<br/>(TLS termination)"]
         Backend["Backend API — FastAPI<br/>(Auth / Commands / Telemetry)"]
         Media["Media Server — MediaMTX<br/>(RTSP / WebRTC relay)"]
@@ -38,21 +38,21 @@ graph TB
 
 ## Technology Stack
 
-| Component               | Technology                          |
-| ----------------------- | ----------------------------------- |
-| Programming Language    | Python                              |
-| Backend Framework       | FastAPI                             |
-| API Architecture        | REST API + WebSocket                |
-| MQTT Integration        | Paho MQTT Client                    |
-| MQTT Broker             | Mosquitto                           |
-| Authentication          | Firebase Admin SDK + JWT + bcrypt   |
-| Database                | Firestore                           |
-| Real-Time Telemetry     | Realtime Database                   |
-| Media Server            | MediaMTX (RTSP / WebRTC)            |
-| Reverse Proxy           | Caddy                               |
-| API Documentation       | OpenAPI / Swagger                   |
-| Containerization        | Docker + Docker Compose             |
-| Deployment              | Linux Server / Cloud Infrastructure |
+| Component            | Technology                          |
+| -------------------- | ----------------------------------- |
+| Programming Language | Python                              |
+| Backend Framework    | FastAPI                             |
+| API Architecture     | REST API + WebSocket                |
+| MQTT Integration     | Paho MQTT Client                    |
+| MQTT Broker          | Mosquitto                           |
+| Authentication       | Firebase Admin SDK + JWT + bcrypt   |
+| Database             | Firestore                           |
+| Real-Time Telemetry  | Realtime Database                   |
+| Media Server         | MediaMTX (RTSP / WebRTC)            |
+| Reverse Proxy        | Caddy                               |
+| API Documentation    | OpenAPI / Swagger                   |
+| Containerization     | Docker + Docker Compose             |
+| Deployment           | Linux Server / Cloud Infrastructure |
 
 ## Key Features
 
@@ -66,23 +66,23 @@ graph TB
 
 ## REST API Endpoints
 
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| `GET` | `/health` | None | Health check |
-| `POST` | `/api/auth/verify` | None | Verify Firebase ID token, return session JWT |
-| `GET` | `/api/devices` | JWT | List all devices |
-| `POST` | `/api/devices` | JWT | Create device + provision secret |
-| `GET` | `/api/devices/{id}` | JWT | Get device details |
-| `PATCH` | `/api/devices/{id}` | JWT | Update device |
-| `DELETE` | `/api/devices/{id}` | JWT | Delete device |
-| `POST` | `/api/devices/{id}/commands` | JWT | Send arbitrary command |
-| `POST` | `/api/devices/{id}/signal` | JWT | Override traffic signal |
-| `GET` | `/api/groups` | JWT | List all groups |
-| `POST` | `/api/groups` | JWT | Create group |
-| `GET` | `/api/groups/{id}` | JWT | Get group details |
-| `PATCH` | `/api/groups/{id}` | JWT | Update group |
-| `DELETE` | `/api/groups/{id}` | JWT | Delete group |
-| `POST` | `/api/groups/{id}/sync` | JWT | Trigger group prepare |
-| `GET` | `/api/mediamtx/auth` | None | MediaMTX auth callback |
+| Method   | Path                         | Auth | Purpose                                      |
+| -------- | ---------------------------- | ---- | -------------------------------------------- |
+| `GET`    | `/health`                    | None | Health check                                 |
+| `POST`   | `/api/auth/verify`           | None | Verify Firebase ID token, return session JWT |
+| `GET`    | `/api/devices`               | JWT  | List all devices                             |
+| `POST`   | `/api/devices`               | JWT  | Create device + provision secret             |
+| `GET`    | `/api/devices/{id}`          | JWT  | Get device details                           |
+| `PATCH`  | `/api/devices/{id}`          | JWT  | Update device                                |
+| `DELETE` | `/api/devices/{id}`          | JWT  | Delete device                                |
+| `POST`   | `/api/devices/{id}/commands` | JWT  | Send arbitrary command                       |
+| `POST`   | `/api/devices/{id}/signal`   | JWT  | Override traffic signal                      |
+| `GET`    | `/api/groups`                | JWT  | List all groups                              |
+| `POST`   | `/api/groups`                | JWT  | Create group                                 |
+| `GET`    | `/api/groups/{id}`           | JWT  | Get group details                            |
+| `PATCH`  | `/api/groups/{id}`           | JWT  | Update group                                 |
+| `DELETE` | `/api/groups/{id}`           | JWT  | Delete group                                 |
+| `POST`   | `/api/groups/{id}/sync`      | JWT  | Trigger group prepare                        |
+| `GET`    | `/api/mediamtx/auth`         | None | MediaMTX auth callback                       |
 
 See [Server Integration](server-integration.md) for details on authentication flows, MQTT communication, and component integration.

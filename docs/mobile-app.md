@@ -1,6 +1,6 @@
 # Flutter Mobile Application
 
-The VC-LANE Flutter mobile app provides the user interface for monitoring and controlling traffic infrastructure. It enables operators to view live camera streams, monitor intersection status, manage edge devices, trigger signal overrides, and coordinate traffic control across multiple intersections.
+The VCLane Flutter mobile app provides the user interface for monitoring and controlling traffic infrastructure. It enables operators to view live camera streams, monitor intersection status, manage edge devices, trigger signal overrides, and coordinate traffic control across multiple intersections.
 
 ## Architecture
 
@@ -63,31 +63,31 @@ lib/
 
 ## Technology Stack
 
-| Component              | Technology                    |
-| ---------------------- | ----------------------------- |
-| Framework              | Flutter (Dart)                |
-| State Management       | Riverpod                      |
-| Routing                | go_router                     |
-| Authentication        | Firebase Authentication       |
-| Database               | Cloud Firestore               |
-| Real-Time Telemetry    | Firebase Realtime Database     |
-| File Storage           | Firebase Storage              |
-| HTTP Client            | Dio                           |
-| Video Playback         | media_kit (RTSP/WebRTC)       |
-| Charts                 | fl_chart                      |
-| Image Picker           | image_picker                  |
-| Fonts                  | google_fonts (Inter)          |
+| Component           | Technology                 |
+| ------------------- | -------------------------- |
+| Framework           | Flutter (Dart)             |
+| State Management    | Riverpod                   |
+| Routing             | go_router                  |
+| Authentication      | Firebase Authentication    |
+| Database            | Cloud Firestore            |
+| Real-Time Telemetry | Firebase Realtime Database |
+| File Storage        | Firebase Storage           |
+| HTTP Client         | Dio                        |
+| Video Playback      | media_kit (RTSP/WebRTC)    |
+| Charts              | fl_chart                   |
+| Image Picker        | image_picker               |
+| Fonts               | google_fonts (Inter)       |
 
 ## Screens
 
-| Screen             | Route                  | Purpose |
-|--------------------|------------------------|---------|
-| LoginScreen        | `/login`               | Email/password sign-in with VC-LANE branding |
-| DashboardScreen    | `/dashboard`           | Device list grouped by status, quick stats, group breakdown |
-| DeviceDetailScreen | `/devices/:id`         | Full device info, telemetry, stream preview, signal override |
-| LiveStreamScreen   | `/devices/:id/stream`  | Full-screen RTSP video playback |
-| ProfileScreen      | `/profile`             | User profile, preferences, app info, sign out |
-| EditProfileScreen  | `/profile/edit`        | Edit display name, photo, address, phone |
+| Screen             | Route                 | Purpose                                                      |
+| ------------------ | --------------------- | ------------------------------------------------------------ |
+| LoginScreen        | `/login`              | Email/password sign-in with VCLane branding                  |
+| DashboardScreen    | `/dashboard`          | Device list grouped by status, quick stats, group breakdown  |
+| DeviceDetailScreen | `/devices/:id`        | Full device info, telemetry, stream preview, signal override |
+| LiveStreamScreen   | `/devices/:id/stream` | Full-screen RTSP video playback                              |
+| ProfileScreen      | `/profile`            | User profile, preferences, app info, sign out                |
+| EditProfileScreen  | `/profile/edit`       | Edit display name, photo, address, phone                     |
 
 Shared widgets include `StatusBadge`, `LoadingIndicator`, `ErrorDisplay`, `EmptyState`, and `ContextExtensions` for theme/media query access.
 
@@ -121,24 +121,24 @@ AuthState: Authenticated | Unauthenticated | AuthLoading | AuthError
 
 All providers are handwritten (no code generation). Key patterns:
 
-| Pattern | Example |
-|---------|---------|
-| `StreamProvider` | Real-time device list, group list |
-| `StreamProvider.family` | Single device by ID, telemetry by device |
-| `FutureProvider.family` | Stream URL by device ID |
+| Pattern                 | Example                                         |
+| ----------------------- | ----------------------------------------------- |
+| `StreamProvider`        | Real-time device list, group list               |
+| `StreamProvider.family` | Single device by ID, telemetry by device        |
+| `FutureProvider.family` | Stream URL by device ID                         |
 | `Provider<T>` (derived) | Auth state, grouped devices, effective readings |
 
 No `autoDispose` is used — all providers are global singletons for the app lifetime.
 
 ## Domain Entities
 
-| Entity | Key Fields |
-|--------|------------|
-| `User` | id, email, displayName, role ('operator') |
-| `Device` | id, name, location, status (online/offline/warning), firmwareVersion, rtspUrl |
-| `Group` | id, name, description, location |
-| `Telemetry` | vehicleCount, currentTrafficLightSignal, timestamp |
-| `SignalOverride` | deviceId, targetSignal, requestedAt |
+| Entity           | Key Fields                                                                    |
+| ---------------- | ----------------------------------------------------------------------------- |
+| `User`           | id, email, displayName, role ('operator')                                     |
+| `Device`         | id, name, location, status (online/offline/warning), firmwareVersion, rtspUrl |
+| `Group`          | id, name, description, location                                               |
+| `Telemetry`      | vehicleCount, currentTrafficLightSignal, timestamp                            |
+| `SignalOverride` | deviceId, targetSignal, requestedAt                                           |
 
 > **Note:** Online/offline state and last-seen timestamps are tracked in the Realtime Database at `/telemetry/{deviceId}`, not in Firestore. The `online` field is set to `true` on every heartbeat or telemetry, and `false` via goodbye message, LWT, or background timeout checker. This avoids excessive Firestore writes from frequent updates.
 
