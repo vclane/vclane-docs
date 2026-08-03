@@ -1,9 +1,16 @@
 [project]
-site_name = "VC-LANE Docs"
+site_name = "VCLane Docs"
 site_url = "https://vclane.github.io/vclane-docs/"
 site_description = "Adaptive Traffic Monitoring System — Documentation"
-copyright = "&copy; 2025 VC-LANE"
+copyright = "&copy; 2026 VCLane"
+repo_url = "https://github.com/vclane/"
+repo_name = "vclane"
 extra_css = ["stylesheets/extra.css"]
+
+[project.extra]
+social = [
+  { icon = "simple/github", link = "https://github.com/vclane" },
+]
 nav = [
   { "Home" = "index.md" },
   { "About" = [
@@ -19,7 +26,6 @@ nav = [
     { "Media Server" = "media-server.md" },
     { "MQTT Communication" = "mqtt-communication.md" },
     { "Server Integration" = "server-integration.md" },
-    { "Edge Device" = "edge-device.md" },
     { "Mobile App" = "mobile-app.md" },
   ]},
   { "Changelog" = "changelog.md" },
@@ -38,6 +44,9 @@ features = [
   "search.highlight",
   "content.tabs.link",
 ]
+
+[project.theme.icon]
+repo = "fontawesome/brands/github"
 
 [project.markdown_extensions.pymdownx.superfences]
 custom_fences = [
