@@ -6,11 +6,6 @@ copyright = "&copy; 2026 VCLane"
 repo_url = "https://github.com/vclane/"
 repo_name = "vclane"
 extra_css = ["stylesheets/extra.css"]
-
-[project.extra]
-social = [
-  { icon = "simple/github", link = "https://github.com/vclane" },
-]
 nav = [
   { "Home" = "index.md" },
   { "About" = [
@@ -29,6 +24,11 @@ nav = [
     { "Mobile App" = "mobile-app.md" },
   ]},
   { "Changelog" = "changelog.md" },
+]
+
+[project.extra]
+social = [
+  { icon = "simple/github", link = "https://github.com/vclane" },
 ]
 
 [project.theme]
