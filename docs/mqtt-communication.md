@@ -73,8 +73,8 @@ traffic/
 {
   "groupId": "group-01",
   "activePhases": [
-    { "intersectionId": "intersection-01", "phase": "NORTH_SOUTH_GREEN" },
-    { "intersectionId": "intersection-02", "phase": "EAST_WEST_RED" }
+    { "deviceId": "intersection-01", "phase": "GREEN" },
+    { "deviceId": "intersection-02", "phase": "RED" }
   ],
   "isFallback": true,
   "timestamp": "2026-07-24T10:00:05Z"
