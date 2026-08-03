@@ -2,6 +2,60 @@
 
 Each intersection contains an independent Raspberry Pi-based edge device acting as the intelligent edge computing unit. It performs video processing, AI inference, traffic analysis, device communication, and local decision-making.
 
+## Hardware Wiring
+
+An intersection node connects three peripherals to the Raspberry Pi: the **LoRa receiver** (listens for phase broadcasts from the group's ESP-32 Traffic Controller), the **relay board** (drives the green/yellow/red signal lamps), and the **camera** (feeds the video/YOLO pipeline).
+
+```mermaid
+graph TD
+    ESP32["ESP-32 Traffic Controller"] -->|"LoRa RF (group frequency)"| LORA["LoRa SX1278 Receiver"]
+    CAM["Camera (CSI / USB)"] -->|"video frames"| PI["Raspberry Pi Edge Device<br/>(40-pin GPIO)"]
+    LORA -->|"SPI"| PI
+    PI -->|"GPIO"| RELAY["Relay Board<br/>(active-low, 3 channels)"]
+    RELAY --> IN1["IN1 — GREEN"]
+    RELAY --> IN2["IN2 — YELLOW"]
+    RELAY --> IN3["IN3 — RED"]
+```
+
+### LoRa module (SX1276 / SX1278)
+
+The LoRa module connects to the Raspberry Pi over SPI. The pins below match the `lora_cs_pin` / `lora_rst_pin` defaults.
+
+| LoRa signal | Pi 40-pin header | BCM GPIO |
+| ----------- | ---------------- | -------- |
+| `3.3V`      | Pin 1            | —        |
+| `GND`       | Any GND pin      | —        |
+| `SCK`       | Pin 23           | 11       |
+| `MOSI`      | Pin 19           | 10       |
+| `MISO`      | Pin 21           | 9        |
+| `CS` (NSS)  | Pin 22           | 25       |
+| `RST`       | Pin 13           | 27       |
+
+- Set `lora_frequency_mhz` to your region's band (433 / 868 / 915 MHz) and match the ESP-32 controller's spreading factor, bandwidth, and coding rate — otherwise packets will not decode.
+- The driver uses the RadioHead-compatible sync word `0x12` (the RadioLib default on the ESP-32); the module's DIO0 pin is not required.
+
+### Relay board
+
+A 3-channel, active-low relay board drives the signal lamps. The pins below match the `relay_pins` defaults (`green`=17, `yellow`=18, `red`=22).
+
+| Relay board | Signal lamp | Pi 40-pin header | BCM GPIO |
+| ----------- | ----------- | ---------------- | -------- |
+| `IN1`       | green       | Pin 11           | 17       |
+| `IN2`       | yellow      | Pin 12           | 18       |
+| `IN3`       | red         | Pin 15           | 22       |
+| `VCC`       | —           | Separate supply  | —        |
+| `GND`       | —           | Any GND pin      | —        |
+
+- Most relay boards are **active-low** (a LOW GPIO signal energizes the coil) — keep `relay_active_high: false`.
+- Relays draw significant current: power the board from a dedicated 5 V / 12 V supply and connect only the signal pins to the Pi.
+
+### Camera
+
+- **USB camera**: plug into any USB port and set `video_source` to the device index (e.g. `"0"`).
+- **Raspberry Pi Camera Module**: connect the ribbon cable to the CSI connector and enable the camera interface; set `video_source` to the camera device.
+
+The default pins are chosen to avoid the SPI bus (GPIO 8–11) and the LoRa CS/RST pins (GPIO 25/27). If you rewire any peripheral, update `lora_cs_pin`, `lora_rst_pin`, or `relay_pins` to match.
+
 ## Video Processing
 
 The edge device handles all camera-related operations.
@@ -60,10 +114,9 @@ The edge device maintains a persistent MQTT connection to the backend when inter
 
 Responsibilities:
 
-- Publish AI traffic telemetry (vehicle counts, lane occupancy, congestion levels)
+- Publish AI traffic telemetry (vehicle count, traffic density)
 - Report the currently actuated traffic light phase (from LoRa) or caution state
-- Send heartbeat updates and connection status
-- Report device health and camera status
+- Send heartbeat updates (process uptime and timestamp)
 
 Example telemetry:
 
@@ -79,14 +132,10 @@ Example telemetry:
 
 ## Device Monitoring
 
-Each edge device periodically reports its system and operational status to the backend (excluding CPU/Memory metrics):
+Each edge device periodically reports its status to the backend over MQTT:
 
-- Online/offline state
-- Storage availability
-- Network connectivity
-- Camera status
-- AI processing status
-- LoRa receiver status (signal strength, packet loss)
+- **Telemetry** (`traffic/device/{deviceId}/telemetry`): current vehicle count, traffic density, and the active traffic light signal (or `CAUTION` during fallback)
+- **Heartbeat** (`traffic/device/{deviceId}/heartbeat`): process uptime and timestamp
 
 ## Software Architecture
 
@@ -103,6 +152,8 @@ vclane-edge/
 │   ├── video.py             # Video pipeline (3 modes)
 │   ├── yolo.py              # YOLO detection wrapper
 │   ├── telemetry.py         # Mock telemetry state
+│   ├── lora.py              # LoRa receiver (ESP-32 phase broadcasts)
+│   ├── relay.py             # Relay actuation + caution fallback
 │   └── registration.py      # Provisioning flow
 ├── pyproject.toml            # uv-managed deps
 ├── Dockerfile                # Multi-stage container
@@ -168,7 +219,7 @@ Auto-registration at `vclane-edge run` start occurs when `device_id` or `device_
 | Programming Language        | Python                         |
 | Video Processing            | OpenCV                         |
 | AI Detection Model          | YOLO Object Detection          |
-| AI Runtime                  | TensorFlow Lite / ONNX Runtime |
+| AI Runtime                  | Ultralytics YOLO (PyTorch)     |
 | Camera Interface            | CSI Camera / USB Camera        |
 | Local Wireless Receiver     | LoRa SX1276 / SX1278 Module    |
 | Local Control Protocol      | SPI (Pi to LoRa) / LoRa Radio  |
@@ -188,6 +239,6 @@ Auto-registration at `vclane-edge run` start occurs when `device_id` or `device_
 
 **Fault Tolerant Safety Fallback** — Reverts to flashing yellow/local caution mode if LoRa control signals are lost or corrupted, ensuring driver safety.
 
-**Device Monitoring** — Storage availability, network connectivity, camera status, AI processing status, and LoRa receiver signal quality.
+**Device Monitoring** — Periodic telemetry (vehicle count, traffic density, active signal) and heartbeat reporting (uptime, timestamp).
 
 **Secure Backend Communication** — Device heartbeat reporting, telemetry publishing, remote configuration updates.
