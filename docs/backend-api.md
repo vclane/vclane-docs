@@ -83,6 +83,39 @@ graph TB
 | `PATCH`  | `/api/groups/{id}`           | JWT  | Update group                                 |
 | `DELETE` | `/api/groups/{id}`           | JWT  | Delete group                                 |
 | `POST`   | `/api/groups/{id}/sync`      | JWT  | Trigger group prepare                        |
+| `POST`   | `/api/groups/{id}/schedule`  | JWT  | Publish + persist group schedule             |
+| `GET`    | `/api/groups/{id}/schedule`  | JWT  | Get the stored group schedule                |
+| `POST`   | `/api/groups/{id}/commands`  | JWT  | Send command to the group controller         |
 | `GET`    | `/api/mediamtx/auth`         | None | MediaMTX auth callback                       |
 
 See [Server Integration](server-integration.md) for details on authentication flows, MQTT communication, and component integration.
+
+## Schedule Synchronization
+
+Schedules are configured per intersection group and are executed locally by the group's ESP-32 Traffic Controller. The backend stores the schedule as the source of truth and delivers it to the controller over MQTT.
+
+### Schedule Model
+
+A schedule is a repeating loop of turns. Turn order is significant: the controller runs turn 1, then turn 2, and so on, wrapping back to turn 1 after the last turn. Phase values are simple signal lamp states: `RED`, `GREEN`, `YELLOW`.
+
+```json
+{
+  "turns": [
+    { "durationSeconds": 90, "phases": { "device-001": "RED",   "device-002": "GREEN", "device-003": "RED" } },
+    { "durationSeconds": 90, "phases": { "device-001": "GREEN", "device-002": "RED",   "device-003": "RED" } }
+  ]
+}
+```
+
+Validation rules:
+
+- `turns` must be a non-empty array
+- `durationSeconds` must be a positive integer (>= 1)
+- `phases` must map device IDs to `RED`, `GREEN`, or `YELLOW`
+
+### Flow
+
+1. **Configure:** `POST /api/groups/{id}/schedule` validates the schedule, persists it to Firestore (`groups/{id}.schedule`), and immediately publishes it to `traffic/group/{id}/schedule`.
+2. **Read:** `GET /api/groups/{id}/schedule` returns the stored schedule (404 if none configured).
+3. **On-connect pull:** When a controller connects, it publishes an empty message to `traffic/group/{id}/schedule-request`. The backend replies on `traffic/group/{id}/schedule` with the stored schedule, keeping the controller's cached copy (and its offline NVS fallback) in sync without periodic polling.
+4. **Execution:** The ESP-32 holds each turn for `durationSeconds`, advancing through the loop continuously, and broadcasts the active phase set over LoRa to the group's edge devices.

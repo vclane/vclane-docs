@@ -37,6 +37,7 @@ traffic/
         {groupId}/
             commands        # Subscribe to manual override and cycle signals
             schedule        # Subscribe to daily schedule configurations
+            schedule-request# Publish a request for the latest schedule on connect
             telemetry       # Publish fallback traffic light active phases
             heartbeat       # Publish controller heartbeat
             status          # LWT online/offline
@@ -82,6 +83,8 @@ traffic/
 ```
 
 **Controller Command & Schedule Delivery** — The backend publishes traffic schedule configurations and manual overrides directly to the group's ESP-32 controller.
+
+**Schedule Sync on Connect** — On connection, the ESP-32 publishes an empty message to `traffic/group/{groupId}/schedule-request`. The backend responds on `traffic/group/{groupId}/schedule` with the stored schedule, keeping the controller's cached copy (and offline NVS fallback) in sync without periodic polling.
 
 **Device Monitoring** — Online/offline tracking for all hardware via LWT (Last Will and Testament) topics and connection status reporting.
 

@@ -4,6 +4,21 @@ This changelog tracks system-wide architectural modifications. Submodule develop
 
 ---
 
+## [2.1.0] — 2026-08-05
+
+### Feature: Schedule Configuration & Controller On-Connect Sync
+
+Schedules are now a first-class, persisted concept instead of fire-and-forget MQTT publishes.
+
+#### Summary of Major Changes
+1.  **Schedule Model:** A group schedule is a repeating loop of turns. Each turn holds a per-device phase set (`RED` / `GREEN` / `YELLOW`) for a fixed `durationSeconds`, then advances to the next turn and wraps after the last. No `groupId` is embedded — the MQTT topic and Firestore document provide scoping.
+2.  **Persisted Source of Truth:** Schedules are stored on the group document in Firestore (`groups/{groupId}.schedule`) as the authoritative copy.
+3.  **REST Endpoints:** `POST /api/groups/{id}/schedule` validates and persists the schedule then publishes it immediately; `GET /api/groups/{id}/schedule` retrieves the stored schedule (404 if none). Validation rejects empty `turns`, non-positive `durationSeconds`, and phase values outside `RED`/`GREEN`/`YELLOW`.
+4.  **On-Connect Sync (replaces periodic polling):** The ESP-32 controller publishes an empty message to `traffic/group/{groupId}/schedule-request` on connect. The backend replies on `traffic/group/{groupId}/schedule` with the stored schedule, keeping the controller's NVS-cached offline fallback in sync without a background sync service.
+5.  **Phase Vocabulary Simplification:** Phase names were normalized to the simple lamp states `RED`, `GREEN`, and `YELLOW`, replacing legacy directional/compound names.
+
+---
+
 ## [2.0.0] — 2026-07-31
 
 ### Architectural Refactor: Grouped Coordinated Control with LoRa Fallback

@@ -6,7 +6,7 @@ Its primary purpose is to ensure that coordinated traffic light signaling remain
 
 ## Responsibilities
 
-*   **Schedule Synchronization:** Connects to the backend via MQTT to receive updated daily traffic schedules, phase definitions, and coordination configurations.
+*   **Schedule Synchronization:** Connects to the backend via MQTT to receive updated daily traffic schedules, phase definitions, and coordination configurations. On connect it publishes a schedule request on `traffic/group/{groupId}/schedule-request`; the backend replies on `traffic/group/{groupId}/schedule` with the latest stored schedule, which the controller caches in NVS.
 *   **Signal Override Execution:** Receives real-time manual override commands from operators via the backend and applies them to the active phase calculation immediately.
 *   **LoRa Phase Broadcasting:** Computes the active traffic light state for all intersections in its group and broadcasts the target states to the Raspberry Pi actuators via LoRa.
 *   **Offline Resilient Scheduling:** In the event of an internet outage, automatically transitions to offline mode, executing schedules locally using its battery-backed Real-Time Clock (RTC).
@@ -95,3 +95,7 @@ stateDiagram-v2
 1.  **Time Synchronization:** While online, the ESP-32 regularly syncs its internal clock with NTP servers and updates the hardware DS3231 RTC. When offline, it relies entirely on the DS3231 RTC.
 2.  **Schedule Caching:** Daily schedule profiles and coordination phase plans are saved in the ESP-32's Non-Volatile Storage (NVS). When connection is lost, it falls back to the plan corresponding to the current time retrieved from the RTC.
 3.  **Connection Recovery:** The ESP-32 executes connection retry attempts in a background thread, ensuring that failure to connect to WiFi/MQTT does not block the primary LoRa broadcasting task.
+
+### Schedule Execution Model
+
+Schedules are a repeating loop of turns, each holding a per-device phase set for a fixed duration (in seconds) before advancing to the next turn; after the last turn the loop wraps to turn 1. Phase values are the simple signal lamp states `RED`, `GREEN`, `YELLOW`. The controller runs the loop continuously and broadcasts the active phase set to the edge devices via LoRa.
