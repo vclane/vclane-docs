@@ -47,7 +47,7 @@ traffic/
 
 | Component      | Technology                        |
 | -------------- | --------------------------------- |
-| Protocol       | MQTT v5                           |
+| Protocol       | MQTT v3.1.1 (controller) / v5-capable broker |
 | Encryption     | TLS (external)                    |
 | MQTT Broker    | Mosquitto                         |
 | Authentication | Mosquitto Dynamic Security Plugin |
@@ -83,6 +83,15 @@ traffic/
 ```
 
 **Controller Command & Schedule Delivery** — The backend publishes traffic schedule configurations and manual overrides directly to the group's ESP-32 controller.
+
+**Group Command Envelope** — Commands on `traffic/group/{gid}/commands` use the `{command, payload}` envelope:
+
+```json
+{ "command": "signal_override", "payload": { "phases": { "device-001": "GREEN", "device-002": "RED" }, "durationSeconds": 30 } }
+{ "command": "cancel_override", "payload": {} }
+```
+
+`durationSeconds <= 0` is indefinite. While an override is active the controller pauses the schedule turn-loop and resumes the same turn at the same offset when the override ends.
 
 **Schedule Sync on Connect** — On connection, the ESP-32 publishes an empty message to `traffic/group/{groupId}/schedule-request`. The backend responds on `traffic/group/{groupId}/schedule` with the stored schedule, keeping the controller's cached copy (and offline NVS fallback) in sync without periodic polling.
 

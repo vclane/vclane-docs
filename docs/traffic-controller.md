@@ -99,3 +99,15 @@ stateDiagram-v2
 ### Schedule Execution Model
 
 Schedules are a repeating loop of turns, each holding a per-device phase set for a fixed duration (in seconds) before advancing to the next turn; after the last turn the loop wraps to turn 1. Phase values are the simple signal lamp states `RED`, `GREEN`, `YELLOW`. The controller runs the loop continuously and broadcasts the active phase set to the edge devices via LoRa.
+
+## Implementation Notes
+
+Reference implementation decisions (see changelog 2.1.1):
+
+- **MQTT version:** The controller connects with **MQTT 3.1.1** over TLS (PubSubClient). The broker is v5-capable; no v5-only features are used.
+- **Group commands** (`traffic/group/{groupId}/commands`) use the envelope `{"command": "signal_override", "payload": {"phases": {...}, "durationSeconds": N}}` or `{"command": "cancel_override", "payload": {}}`. `durationSeconds <= 0` is indefinite. An active override pauses the turn-loop and resumes the same turn at the same offset on expiry/cancel.
+- **Fallback telemetry:** the controller publishes `traffic/group/{groupId}/telemetry` every **10 s** with `isFallback: true`, since it cannot observe edge-device connectivity directly. Heartbeat (`traffic/group/{groupId}/heartbeat`) is published every **30 s** (groupId, uptime, timestamp).
+- **LoRa burst:** a phase change sends a **burst of 3 packets** retransmitting the *same logical packet* (identical `seq`); the regular heartbeat broadcast is 1 packet per second. Receivers reject duplicates/stale packets by `seq`. `seq` is persisted to NVS on each phase change so deduplication survives a controller reboot.
+- **Provisioning:** WiFi, MQTT broker + CA cert, group ID, and LoRa frequency are written to NVS via a serial-console wizard on first boot.
+- **LoRa radio config** is region-dependent (433/868/915 MHz); spreading factor, bandwidth, and coding rate must match the group's edge devices (RadioLib sync word `0x12`).
+- **`traffic/group/{id}/prepare`** is a backend→edge-device topic and is ignored by the controller.

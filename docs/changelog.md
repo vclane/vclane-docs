@@ -17,6 +17,24 @@ Schedules are now a first-class, persisted concept instead of fire-and-forget MQ
 4.  **On-Connect Sync (replaces periodic polling):** The ESP-32 controller publishes an empty message to `traffic/group/{groupId}/schedule-request` on connect. The backend replies on `traffic/group/{groupId}/schedule` with the stored schedule, keeping the controller's NVS-cached offline fallback in sync without a background sync service.
 5.  **Phase Vocabulary Simplification:** Phase names were normalized to the simple lamp states `RED`, `GREEN`, and `YELLOW`, replacing legacy directional/compound names.
 
+## [2.1.1] — 2026-08-08
+
+### Controller Implementation Notes (drift resolutions)
+
+Resolved ambiguities from the 2.1.0 spec against the reference ESP-32 controller implementation.
+
+#### Summary of Major Changes
+
+1.  **Group Command Envelope:** Commands on `traffic/group/{groupId}/commands` reuse the backend's `{command, payload}` envelope:
+    - `{"command": "signal_override", "payload": {"phases": { "device-001": "GREEN" }, "durationSeconds": 30}}`
+    - `{"command": "cancel_override", "payload": {}}`
+    - `durationSeconds <= 0` means indefinite. An active override pauses the schedule turn-loop and resumes the same turn at the same offset when it ends.
+2.  **MQTT Version:** The ESP-32 controller speaks **MQTT 3.1.1** over TLS (via PubSubClient). The broker remains v5-capable; the controller uses no v5-only features.
+3.  **Fallback Telemetry Trigger:** The controller cannot directly observe edge-device connectivity. It publishes group telemetry periodically (default **10 s**) with `isFallback: true`; the backend keeps this visible regardless of edge state.
+4.  **Timing Intervals:** LoRa heartbeat **1 s**; phase-change burst **3 packets**; MQTT heartbeat **30 s**; fallback telemetry **10 s**.
+5.  **LoRa Burst Semantics:** A 3-packet burst retransmits the same logical packet (identical `seq`); receivers deduplicate by `seq`. `seq` increments once per phase change and is persisted to NVS so stale/duplicate filtering survives controller reboots.
+6.  **Provisioning:** The controller is configured over its serial console (WiFi, MQTT broker + CA cert, group ID, LoRa frequency) into NVS.
+
 ---
 
 ## [2.0.0] — 2026-07-31

@@ -141,6 +141,7 @@ All inbound handlers parse the topic to extract `deviceId` (third segment) and r
 | --------------------------------- | ------------------------------ | -------------------------------------------------------------------- |
 | `POST /api/devices/{id}/commands` | `traffic/device/{id}/commands` | `{"command": "...", "payload": {...}}`                               |
 | `POST /api/devices/{id}/signal`   | `traffic/device/{id}/commands` | `{"command": "signal_override", "payload": {"targetSignal": "..."}}` |
+| `POST /api/groups/{id}/commands`  | `traffic/group/{id}/commands`  | `{"command": "signal_override", "payload": {"phases": {...}, "durationSeconds": N}}` |
 | `POST /api/groups/{id}/sync`      | `traffic/group/{id}/prepare`   | `{"deviceIds": ["id1", "id2", ...]}`                                 |
 
 ---
@@ -211,6 +212,15 @@ sequenceDiagram
 
 The backend also writes a Firestore document to `signalOverrides/{id}` with `{deviceId, targetSignal, requestedBy, status: "active", requestedAt, expiresAt}` (expires in 1 hour). Expiration is not enforced by the backend — the edge device is expected to honor it.
 
+**Group command (signal override / cancel)** — published on `POST /api/groups/{id}/commands` to `traffic/group/{id}/commands`:
+
+```json
+{ "command": "signal_override", "payload": { "phases": { "device-001": "GREEN", "device-002": "RED" }, "durationSeconds": 30 } }
+{ "command": "cancel_override", "payload": {} }
+```
+
+`durationSeconds <= 0` is indefinite. The ESP-32 controller pauses its schedule turn-loop while an override is active and resumes the same turn at the same offset on expiry/cancel.
+
 **Group sync** (published on `POST /api/groups/{id}/sync`):
 
 ```json
@@ -231,6 +241,11 @@ Edge devices in the group respond on `traffic/group/{groupId}/prepare-response`.
 | Device → Backend  | `traffic/device/{id}/heartbeat`        | Edge device | Backend (→RTDB)       | Arbitrary JSON                    |
 | Device → Backend  | `traffic/device/{id}/acknowledgements` | Edge device | Backend (logged)      | Arbitrary JSON                    |
 | Device → Backend  | `traffic/group/{id}/prepare-response`  | Edge device | Backend (unhandled)   | Arbitrary JSON                    |
+| Controller → Backend | `traffic/group/{id}/schedule-request` | ESP-32 controller | Backend         | Empty (on connect)                |
+| Controller → Backend | `traffic/group/{id}/telemetry`      | ESP-32 controller | Backend (→RTDB)  | Fallback active phases JSON       |
+| Controller → Backend | `traffic/group/{id}/heartbeat`      | ESP-32 controller | Backend          | Uptime + timestamp JSON           |
+| Backend → Controller | `traffic/group/{id}/schedule`      | Backend     | ESP-32 controller | Schedule JSON                     |
+| Backend → Controller | `traffic/group/{id}/commands`      | Backend     | ESP-32 controller | `{"command": str, "payload": {}}` |
 | Backend → Device  | `traffic/device/{id}/commands`         | Backend     | Edge device           | `{"command": str, "payload": {}}` |
 | Backend → Devices | `traffic/group/{id}/prepare`           | Backend     | Edge devices in group | `{"deviceIds": [str]}`            |
 
