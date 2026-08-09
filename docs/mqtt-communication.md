@@ -91,7 +91,7 @@ traffic/
 { "command": "cancel_override", "payload": {} }
 ```
 
-`durationSeconds <= 0` is indefinite. While an override is active the controller pauses the schedule turn-loop and resumes the same turn at the same offset when the override ends.
+`durationSeconds <= 0` is indefinite. While an override is active the controller pauses the schedule turn-loop and uses the override phases in its place; when the override ends (expiry or cancel) it resumes the same turn it paused on but restarts that turn's full duration from the beginning — remaining time is not preserved.
 
 **Schedule Sync on Connect** — On connection, the ESP-32 publishes an empty message to `traffic/group/{groupId}/schedule-request`. The backend responds on `traffic/group/{groupId}/schedule` with the stored schedule, keeping the controller's cached copy (and offline NVS fallback) in sync without periodic polling.
 

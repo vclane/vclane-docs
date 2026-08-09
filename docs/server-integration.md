@@ -219,7 +219,7 @@ The backend also writes a Firestore document to `signalOverrides/{id}` with `{de
 { "command": "cancel_override", "payload": {} }
 ```
 
-`durationSeconds <= 0` is indefinite. The ESP-32 controller pauses its schedule turn-loop while an override is active and resumes the same turn at the same offset on expiry/cancel.
+`durationSeconds <= 0` is indefinite. The ESP-32 controller pauses its schedule turn-loop while an override is active and uses the override phases in its place; on expiry/cancel it resumes the same turn it paused on but restarts that turn's full duration from the beginning — remaining time is not preserved.
 
 **Group sync** (published on `POST /api/groups/{id}/sync`):
 

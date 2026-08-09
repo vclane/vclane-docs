@@ -28,7 +28,7 @@ Resolved ambiguities from the 2.1.0 spec against the reference ESP-32 controller
 1.  **Group Command Envelope:** Commands on `traffic/group/{groupId}/commands` reuse the backend's `{command, payload}` envelope:
     - `{"command": "signal_override", "payload": {"phases": { "device-001": "GREEN" }, "durationSeconds": 30}}`
     - `{"command": "cancel_override", "payload": {}}`
-    - `durationSeconds <= 0` means indefinite. An active override pauses the schedule turn-loop and resumes the same turn at the same offset when it ends.
+    - `durationSeconds <= 0` means indefinite. An active override pauses the schedule turn-loop and uses the override phases in its place. When the override ends (expiry or cancel) the controller resumes the same turn it paused on but restarts that turn's full duration from the beginning — remaining time is not preserved.
 2.  **MQTT Version:** The ESP-32 controller speaks **MQTT 3.1.1** over TLS (via PubSubClient). The broker remains v5-capable; the controller uses no v5-only features.
 3.  **Fallback Telemetry Trigger:** The controller cannot directly observe edge-device connectivity. It publishes group telemetry periodically (default **10 s**) with `isFallback: true`; the backend keeps this visible regardless of edge state.
 4.  **Timing Intervals:** LoRa heartbeat **1 s**; phase-change burst **3 packets**; MQTT heartbeat **30 s**; fallback telemetry **10 s**.
