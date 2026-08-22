@@ -28,6 +28,50 @@ Its primary purpose is to ensure that coordinated traffic light signaling remain
 | Data Format (Backend)   | JSON                                                   |
 | Data Format (Radio)     | Compact JSON or Binary Byte Array                      |
 
+## Hardware Wiring
+
+The ESP-32 Traffic Controller connects three peripherals: the **LoRa transmitter** (broadcasts phase sync to the group's edge devices), the **DS3231 RTC** (battery-backed time source that keeps the schedule running through outages and reboots), and **WiFi / Ethernet** (backend connectivity). Schedules, overrides, and the LoRa `seq` counter are persisted in the ESP-32's on-chip **NVS**.
+
+```mermaid
+graph TD
+    LORA["LoRa SX1278 Transmitter"] -->|"SPI"| ESP32["ESP-32 Traffic Controller"]
+    RTC["DS3231 RTC<br/>(battery-backed)"] -->|"I2C"| ESP32
+    BATT["Coin-cell Battery"] -->|"VBAT"| RTC
+    WIFI["WiFi / Ethernet PHY"] -->|"integrated / SPI"| ESP32
+    ESP32 -->|"persisted"| NVS["ESP32 NVS<br/>(on-chip)"]
+```
+
+### LoRa module (SX1276 / SX1278)
+
+The LoRa module connects to the ESP-32 over SPI. The pins below match the `VCLANE_LORA_*` defaults.
+
+| LoRa signal | ESP32 GPIO |
+| ----------- | ---------- |
+| `SCK`       | 18         |
+| `MOSI`      | 23         |
+| `MISO`      | 19         |
+| `CS` (NSS)  | 5          |
+| `RST`       | 4          |
+| `3.3V`      | —          |
+| `GND`       | —          |
+
+- Set `lora_frequency_mhz` to your region's band (433 / 868 / 915 MHz) and match the edge devices' spreading factor, bandwidth, and coding rate — otherwise packets will not decode.
+- The RadioLib sync word `0x12` must match the group's edge devices.
+
+### DS3231 RTC
+
+The DS3231 connects to the ESP-32 over I2C and is backed by a coin-cell battery so the clock keeps running through power loss and reboots. The pins below match the `VCLANE_I2C_*` defaults.
+
+| RTC signal | ESP32 GPIO |
+| ---------- | ---------- |
+| `SDA`      | 21         |
+| `SCL`      | 22         |
+| `VCC`      | 3.3 V      |
+| `GND`      | —          |
+| `VBAT`     | Coin cell  |
+
+- While online the ESP-32 syncs time via NTP and writes it to the DS3231; while offline it relies entirely on the RTC, so a healthy battery is required for correct offline scheduling after a power cycle.
+
 ## LoRa Communication Specification
 
 LoRa communication operates locally in a broadcast-only topology from the ESP-32 Traffic Controller (Master) to the Raspberry Pi Edge Devices (Slaves) within a localized group.
