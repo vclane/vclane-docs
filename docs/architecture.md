@@ -43,7 +43,7 @@ The system operates in two main modes to balance intelligent centralized control
 Under standard operating conditions with active internet connectivity:
 
 - **Schedule and Override Control:** The Backend API publishes group configuration, signal timing plans, and manual overrides to the MQTT broker. The **ESP-32 Traffic Controller** (connected via WiFi) subscribes to these topics, processes the schedules, and runs the local coordination logic.
-- **Local Broadcast:** The ESP-32 broadcasts the target phase states (e.g., green/yellow/red durations for each lane) to the group's **Raspberry Pi Edge Devices** using LoRa.
+- **Local Broadcast:** The ESP-32 broadcasts the target phase states (e.g., green/red durations for each lane) to the group's **Raspberry Pi Edge Devices** using LoRa.
 - **Actuation:** The Raspberry Pi units receive the LoRa packets and drive the physical GPIO-connected relays to actuate the traffic signal lamps.
 - **Telemetry and Streaming:** The Raspberry Pis process video streams locally, run YOLO inference for traffic analysis, and publish traffic statistics (vehicle counts, congestion levels) and device heartbeats directly to the backend via MQTT. They also stream live RTSP video feeds to the Media Server.
 

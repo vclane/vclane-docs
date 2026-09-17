@@ -4,17 +4,16 @@ Each intersection contains an independent Raspberry Pi-based edge device acting 
 
 ## Hardware Wiring
 
-An intersection node connects three peripherals to the Raspberry Pi: the **LoRa receiver** (listens for phase broadcasts from the group's ESP-32 Traffic Controller), the **relay board** (drives the green/yellow/red signal lamps), and the **camera** (feeds the video/YOLO pipeline).
+An intersection node connects three peripherals to the Raspberry Pi: the **LoRa receiver** (listens for phase broadcasts from the group's ESP-32 Traffic Controller), the **relay board** (drives the green/red signal lamps), and the **camera** (feeds the video/YOLO pipeline).
 
 ```mermaid
 graph TD
     ESP32["ESP-32 Traffic Controller"] -->|"LoRa RF (group frequency)"| LORA["LoRa SX1278 Receiver"]
     CAM["Camera (CSI / USB)"] -->|"video frames"| PI["Raspberry Pi Edge Device<br/>(40-pin GPIO)"]
     LORA -->|"SPI"| PI
-    PI -->|"GPIO"| RELAY["Relay Board<br/>(active-low, 3 channels)"]
+    PI -->|"GPIO"| RELAY["Relay Board<br/>(active-low, 2 channels)"]
     RELAY --> IN1["IN1 — GREEN"]
-    RELAY --> IN2["IN2 — YELLOW"]
-    RELAY --> IN3["IN3 — RED"]
+    RELAY --> IN2["IN2 — RED"]
 ```
 
 ### LoRa module (SX1276 / SX1278)
@@ -36,13 +35,12 @@ The LoRa module connects to the Raspberry Pi over SPI. The pins below match the 
 
 ### Relay board
 
-A 3-channel, active-low relay board drives the signal lamps. The pins below match the `relay_pins` defaults (`green`=17, `yellow`=18, `red`=22).
+A 2-channel, active-low relay board drives the signal lamps. The pins below match the `relay_pins` defaults (`green`=17, `red`=22).
 
 | Relay board | Signal lamp | Pi 40-pin header | BCM GPIO |
 | ----------- | ----------- | ---------------- | -------- |
 | `IN1`       | green       | Pin 11           | 17       |
-| `IN2`       | yellow      | Pin 12           | 18       |
-| `IN3`       | red         | Pin 15           | 22       |
+| `IN2`       | red         | Pin 15           | 22       |
 | `VCC`       | —           | Separate supply  | —        |
 | `GND`       | —           | Any GND pin      | —        |
 
@@ -105,8 +103,8 @@ Under the grouped architecture, the Raspberry Pi Edge Device functions as the ph
 Key behaviors:
 
 - **LoRa Packet Reception:** The Raspberry Pi continuously listens for LoRa broadcast signals containing the target active phases.
-- **Relay Actuation:** It parses the received command (e.g., active phase, green-yellow-red light configurations) and controls the physical relays to update the signal lamps.
-- **Resilient Fallback:** If the LoRa broadcast signal is lost (e.g., ESP-32 hardware failure), the Raspberry Pi falls back to a pre-programmed local safety routine (such as flashing yellow for caution) to prevent unsafe signal states.
+- **Relay Actuation:** It parses the received command (e.g., active phase, green/red light configurations) and controls the physical relays to update the signal lamps.
+- **Resilient Fallback:** If the LoRa broadcast signal is lost (e.g., ESP-32 hardware failure), the Raspberry Pi falls back to a pre-programmed local safety routine (such as all relays off for caution) to prevent unsafe signal states.
 
 ## Backend Communication
 
@@ -235,9 +233,9 @@ Auto-registration at `vclane-edge run` start occurs when `device_id` or `device_
 
 **Local Edge Processing** — Performs AI inference locally, reduces bandwidth consumption, provides faster response time, minimizes cloud processing requirements.
 
-**LoRa-Driven Signal Actuation** — Receives synchronized traffic light phase commands from the group's ESP-32 Traffic Controller via LoRa, driving the physical light relays.
+**LoRa-Driven Signal Actuation** — Receives synchronized traffic light phase commands from the group's ESP-32 Traffic Controller via LoRa, driving the physical green/red relays.
 
-**Fault Tolerant Safety Fallback** — Reverts to flashing yellow/local caution mode if LoRa control signals are lost or corrupted, ensuring driver safety.
+**Fault Tolerant Safety Fallback** — Reverts to all relays off/local caution mode if LoRa control signals are lost or corrupted, ensuring driver safety.
 
 **Device Monitoring** — Periodic telemetry (vehicle count, traffic density, active signal) and heartbeat reporting (uptime, timestamp).
 
