@@ -6,7 +6,7 @@ MQTT provides the real-time communication channel between the backend, the ESP-3
 
 - Deliver timing schedules (turns loop + scheduling mode) and manual overrides to ESP-32 Traffic Controllers
 - Deliver per-device queue `enqueue` commands to ESP-32 Traffic Controllers (dynamic mode)
-- Receive AI traffic telemetry from Raspberry Pi Edge Devices (live + cumulative vehicle counts, per-direction / per-class breakdowns, congestion status, active traffic light phase) — live `vehicleCount >= 1` doubles as the vehicle-detection trigger in dynamic mode
+- Receive AI traffic telemetry from Raspberry Pi Edge Devices (live + cumulative vehicle counts, per-direction / per-class breakdowns, congestion status, emergency-vehicle flag, active traffic light phase) — live `vehicleCount >= 1` doubles as the vehicle-detection trigger in dynamic mode
 - Receive fallback traffic light phase telemetry + queue-completion notices from ESP-32 Traffic Controllers
 - Receive connection heartbeats and device health stats from all devices
 - Maintain persistent, low-latency connections over TLS
@@ -59,7 +59,7 @@ traffic/
 
 ## Key Features
 
-**Edge Telemetry Communication** — Raspberry Pi Edge Devices publish traffic statistics and AI analysis results. With tracking enabled (`tracker: bytetrack.yaml`), `vehicleCount` is the live occupancy, `vehicleTotal` is the cumulative line-crossing total, and `directionCounts` / `classCounts` carry the breakdowns. In detect-only mode the device falls back to a mock `vehicleCount` random walk with `vehicleTotal: 0` and empty breakdowns.
+**Edge Telemetry Communication** — Raspberry Pi Edge Devices publish traffic statistics and AI analysis results. With tracking enabled (`tracker: bytetrack.yaml`), `vehicleCount` is the live occupancy, `vehicleTotal` is the cumulative line-crossing total, and `directionCounts` / `classCounts` carry the breakdowns. `emergencyVehicleDetected` / `emergencyClass` / `emergencyConfidence` flag a visible emergency vehicle (`ambulance`, `fire truck`, `police car` by default). In detect-only mode the device falls back to a mock `vehicleCount` random walk with `vehicleTotal: 0` and empty breakdowns.
 
 ```json
 {
@@ -70,6 +70,9 @@ traffic/
   "classCounts": { "car": 9, "truck": 2, "bus": 1 },
   "trafficDensity": "MODERATE",
   "currentTrafficLightSignal": "GREEN",
+  "emergencyVehicleDetected": false,
+  "emergencyClass": "",
+  "emergencyConfidence": 0.0,
   "timestamp": "2026-07-24T10:00:00Z"
 }
 ```

@@ -170,7 +170,7 @@ The edge device maintains a persistent MQTT connection to the backend when inter
 
 Responsibilities:
 
-- Publish AI traffic telemetry (live count, cumulative total, per-direction / per-class breakdowns, traffic density)
+- Publish AI traffic telemetry (live count, cumulative total, per-direction / per-class breakdowns, traffic density, emergency-vehicle flag)
 - Publish telemetry **immediately on vehicle arrival** (live count `0 → >= 1` rising edge) so the backend queue gate can react fast when the group is in `dynamic` mode, plus the normal periodic publish
 - Report the currently actuated traffic light phase (from LoRa) or caution state
 - Send heartbeat updates (process uptime and timestamp)
@@ -188,17 +188,26 @@ Example telemetry (tracking enabled):
   "classCounts": { "car": 9, "truck": 2, "bus": 1 },
   "trafficDensity": "MODERATE",
   "currentTrafficLightSignal": "GREEN",
+  "emergencyVehicleDetected": false,
+  "emergencyClass": "",
+  "emergencyConfidence": 0.0,
   "timestamp": "2026-07-24T10:00:00Z"
 }
 ```
 
+When an emergency vehicle (`ambulance`, `fire truck`, `police car` by default) is visible, `emergencyVehicleDetected` is `true` with the top-match `emergencyClass` / `emergencyConfidence` (e.g. `"ambulance"`, `0.91`).
+
 Detect-only mode (no tracker) omits real counts and falls back to the mock `vehicleCount` random walk; `vehicleTotal` stays `0` with empty `directionCounts` / `classCounts`.
+
+### Emergency Vehicle Override
+
+When YOLO reports an `emergency_classes` label (`ambulance`, `fire truck`, `police car` by default) above `emergency_confidence` for `emergency_min_frames` consecutive sightings, the edge sets the telemetry emergency flag and sends one `signal_override` request per distinct vehicle (tracked by ByteTrack ID; one request per presence episode in detect-only mode) via the existing `POST /api/groups/{id}/commands` endpoint (`durationSeconds: 60` by default, no cancel — the override expires naturally). Auth reuses `POST /api/auth/login` with `admin_email` / `admin_password` (or `VCLANE_ADMIN_EMAIL` / `VCLANE_ADMIN_PASSWORD`). Requires `api_url` + `group_id` + admin credentials; without them the device sets the telemetry flag only. A global `emergency_cooldown_s` (default 60 s) suppresses redundant POSTs while an override is active.
 
 ## Device Monitoring
 
 Each edge device periodically reports its status to the backend over MQTT:
 
-- **Telemetry** (`traffic/device/{deviceId}/telemetry`): live vehicle count, cumulative total, per-direction counts, per-class counts, traffic density, and the active traffic light signal (or `CAUTION` during fallback). In `dynamic` groups, live `vehicleCount >= 1` doubles as the queue-detection trigger.
+- **Telemetry** (`traffic/device/{deviceId}/telemetry`): live vehicle count, cumulative total, per-direction counts, per-class counts, traffic density, emergency-vehicle flag (`emergencyVehicleDetected` / `emergencyClass` / `emergencyConfidence`), and the active traffic light signal (or `CAUTION` during fallback). In `dynamic` groups, live `vehicleCount >= 1` doubles as the queue-detection trigger.
 - **Heartbeat** (`traffic/device/{deviceId}/heartbeat`): process uptime and timestamp
 
 ## Software Architecture
@@ -217,9 +226,12 @@ vclane-edge/
 │   ├── yolo.py              # YOLO detection + ByteTrack wrapper (track/reset_tracker/annotate)
 │   ├── counter.py           # VehicleCounter + CountingLine (live + line-crossing counts)
 │   ├── telemetry.py         # Telemetry state (set_counts / random_walk fallback)
+│   ├── emergency.py         # EmergencyTracker (one override per distinct vehicle)
+│   ├── backend_api.py       # Backend HTTP client (auth, provisioning, commands)
+│   ├── signal_override.py   # Override scheduler (cooldown + worker thread)
 │   ├── lora.py              # LoRa receiver (ESP-32 phase broadcasts)
 │   ├── relay.py             # Relay actuation + caution fallback
-│   └── registration.py      # Provisioning flow
+│   ├── backend_api.py       # Backend HTTP client (auth, provisioning, commands)
 ├── scripts/
 │   └── test_tracking.py     # Manual ByteTrack verification (--source <video|0> [--save out.mp4])
 ├── pyproject.toml            # uv-managed deps (includes `lap` for ByteTrack association)
@@ -314,6 +326,6 @@ Auto-registration at `vclane-edge run` start occurs when `device_id` or `device_
 
 **Fault Tolerant Safety Fallback** — Reverts to all relays off/local caution mode if LoRa control signals are lost or corrupted, ensuring driver safety.
 
-**Device Monitoring** — Periodic telemetry (live count, cumulative total, per-direction / per-class counts, traffic density, active signal) and heartbeat reporting (uptime, timestamp).
+**Device Monitoring** — Periodic telemetry (live count, cumulative total, per-direction / per-class counts, traffic density, emergency-vehicle flag, active signal) and heartbeat reporting (uptime, timestamp).
 
 **Secure Backend Communication** — Device heartbeat reporting, telemetry publishing, remote configuration updates.

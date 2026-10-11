@@ -73,7 +73,7 @@ This path is updated on every heartbeat and telemetry message from the edge devi
 
 | Field                  | Type            | Source              | Description                                                                                       |
 | ---------------------- | --------------- | ------------------- | ------------------------------------------------------------------------------------------------- |
-| _(device fields)_      | _various_       | Device payload      | Device-specific data (vehicleCount, vehicleTotal, directionCounts, classCounts, trafficDensity, etc.) |
+| _(device fields)_      | _various_       | Device payload      | Device-specific data (vehicleCount, vehicleTotal, directionCounts, classCounts, trafficDensity, emergencyVehicleDetected, emergencyClass, emergencyConfidence, etc.) |
 | `timestamp`            | `string \| int` | Device payload      | Device-local timestamp                                                                            |
 | `online`               | `bool`          | Injected by backend | `True` — set on every heartbeat or telemetry, `False` — set by goodbye message or timeout checker |
 | `lastSeen`             | `int`           | Injected by backend | Server Unix timestamp of the most recent heartbeat or telemetry                                   |
@@ -93,6 +93,9 @@ Example document (tracking enabled, dynamically queued):
   "classCounts": { "car": 9, "truck": 2, "bus": 1 },
   "trafficDensity": "MODERATE",
   "currentTrafficLightSignal": "RED",
+  "emergencyVehicleDetected": false,
+  "emergencyClass": "",
+  "emergencyConfidence": 0.0,
   "timestamp": "2026-07-24T10:00:00Z",
   "online": true,
   "lastSeen": 1721815200,
