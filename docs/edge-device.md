@@ -171,8 +171,11 @@ The edge device maintains a persistent MQTT connection to the backend when inter
 Responsibilities:
 
 - Publish AI traffic telemetry (live count, cumulative total, per-direction / per-class breakdowns, traffic density)
+- Publish telemetry **immediately on vehicle arrival** (live count `0 → >= 1` rising edge) so the backend queue gate can react fast when the group is in `dynamic` mode, plus the normal periodic publish
 - Report the currently actuated traffic light phase (from LoRa) or caution state
 - Send heartbeat updates (process uptime and timestamp)
+
+> Detection threshold is 1 vehicle: any telemetry with live `vehicleCount >= 1` is treated by the backend as a detection event when the device's group is in `dynamic` mode (requires tracking enabled for real counts; in detect-only mock mode counts are synthetic). Dedup is server-side via RTDB `has_queued_schedule` — the edge keeps publishing normally and never tracks queue state itself.
 
 Example telemetry (tracking enabled):
 
@@ -195,7 +198,7 @@ Detect-only mode (no tracker) omits real counts and falls back to the mock `vehi
 
 Each edge device periodically reports its status to the backend over MQTT:
 
-- **Telemetry** (`traffic/device/{deviceId}/telemetry`): live vehicle count, cumulative total, per-direction counts, per-class counts, traffic density, and the active traffic light signal (or `CAUTION` during fallback)
+- **Telemetry** (`traffic/device/{deviceId}/telemetry`): live vehicle count, cumulative total, per-direction counts, per-class counts, traffic density, and the active traffic light signal (or `CAUTION` during fallback). In `dynamic` groups, live `vehicleCount >= 1` doubles as the queue-detection trigger.
 - **Heartbeat** (`traffic/device/{deviceId}/heartbeat`): process uptime and timestamp
 
 ## Software Architecture

@@ -26,14 +26,19 @@ Firestore stores long-lived documents in collections. It is used for device meta
 
 #### `groups/{groupId}`
 
-| Field         | Type        | Description                     |
-| ------------- | ----------- | ------------------------------- |
-| `name`        | `string`    | Group display name              |
-| `description` | `string`    | Group description               |
-| `location`    | `string`    | Group location                  |
-| `deviceIds`   | `string[]`  | List of device IDs in the group |
-| `createdAt`   | `Timestamp` | Document creation time          |
-| `updatedAt`   | `Timestamp` | Last document update time       |
+| Field            | Type        | Description                                                              |
+| ---------------- | ----------- | ------------------------------------------------------------------------ |
+| `name`           | `string`    | Group display name                                                       |
+| `description`    | `string`    | Group description                                                        |
+| `location`       | `string`    | Group location                                                           |
+| `deviceIds`      | `string[]`  | List of device IDs in the group                                          |
+| `schedule`       | `map`       | Repeating turns loop `{turns: [{durationSeconds, phases}]}` (see Backend API) |
+| `schedulingMode` | `string`    | Per-group executor: `"fixed"` (turns loop, default) or `"dynamic"` (FIFO queue) |
+| `dynamicConfig`  | `map`       | Dynamic queue timings: `{greenSec, allRedSec}` (2-channel GREEN/RED relays) |
+| `createdAt`      | `Timestamp` | Document creation time                                                   |
+| `updatedAt`      | `Timestamp` | Last document update time                                                |
+
+> **Note:** `schedulingMode` is per-group. `fixed` runs the stored turns loop; `dynamic` runs queue-based on-demand scheduling (see [Traffic Controller](traffic-controller.md)). The mode and timings are delivered to the controller via `traffic/group/{groupId}/schedule` and cached in NVS.
 
 #### `users/{uid}`
 
@@ -64,16 +69,20 @@ RTDB stores ephemeral, rapidly-changing data. It is used for the latest telemetr
 
 #### `/telemetry/{deviceId}`
 
-This path is updated on every heartbeat and telemetry message from the edge device. The payload is an **arbitrary JSON object** from the device, with two fields injected by the backend:
+This path is updated on every heartbeat and telemetry message from the edge device. The payload is an **arbitrary JSON object** from the device, with four fields injected/maintained by the backend:
 
-| Field             | Type            | Source              | Description                                                                                       |
-| ----------------- | --------------- | ------------------- | ------------------------------------------------------------------------------------------------- |
-| _(device fields)_ | _various_       | Device payload      | Device-specific data (vehicleCount, vehicleTotal, directionCounts, classCounts, trafficDensity, etc.) |
-| `timestamp`       | `string \| int` | Device payload      | Device-local timestamp                                                                            |
-| `online`          | `bool`          | Injected by backend | `True` — set on every heartbeat or telemetry, `False` — set by goodbye message or timeout checker |
-| `lastSeen`        | `int`           | Injected by backend | Server Unix timestamp of the most recent heartbeat or telemetry                                   |
+| Field                  | Type            | Source              | Description                                                                                       |
+| ---------------------- | --------------- | ------------------- | ------------------------------------------------------------------------------------------------- |
+| _(device fields)_      | _various_       | Device payload      | Device-specific data (vehicleCount, vehicleTotal, directionCounts, classCounts, trafficDensity, etc.) |
+| `timestamp`            | `string \| int` | Device payload      | Device-local timestamp                                                                            |
+| `online`               | `bool`          | Injected by backend | `True` — set on every heartbeat or telemetry, `False` — set by goodbye message or timeout checker |
+| `lastSeen`             | `int`           | Injected by backend | Server Unix timestamp of the most recent heartbeat or telemetry                                   |
+| `has_queued_schedule`  | `bool`          | Backend queue gate  | `True` — device has a pending/ongoing queued GREEN in dynamic mode; `False` — default/idle        |
+| `queuedAt`             | `int \| null`   | Backend queue gate  | Server Unix timestamp of the last `enqueue`, cleared (`null`) on `queue-done`                     |
 
-Example document (tracking enabled):
+> **Note:** `has_queued_schedule` / `queuedAt` are only used when the device's group has `schedulingMode: "dynamic"`. They are written **only by the backend** (set on `enqueue`, cleared on controller `queue-done`); edge devices never write them. They provide dedup: while `has_queued_schedule` is `true`, further `vehicleCount >= 1` telemetry for that device does not trigger another enqueue.
+
+Example document (tracking enabled, dynamically queued):
 
 ```json
 {
@@ -83,10 +92,12 @@ Example document (tracking enabled):
   "directionCounts": { "northbound": 148 },
   "classCounts": { "car": 9, "truck": 2, "bus": 1 },
   "trafficDensity": "MODERATE",
-  "currentTrafficLightSignal": "GREEN",
+  "currentTrafficLightSignal": "RED",
   "timestamp": "2026-07-24T10:00:00Z",
   "online": true,
-  "lastSeen": 1721815200
+  "lastSeen": 1721815200,
+  "has_queued_schedule": true,
+  "queuedAt": 1721815201
 }
 ```
 

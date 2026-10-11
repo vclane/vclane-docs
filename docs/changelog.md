@@ -4,6 +4,21 @@ This changelog tracks system-wide architectural modifications. Submodule develop
 
 ---
 
+## [2.4.0] — 2026-10-11
+
+### Feature: Dynamic Queue-Based Scheduling (per-group, opt-in)
+
+Groups can now switch from the fixed-interval turns loop to on-demand queue scheduling: the controller idles at all-RED and serves GREEN only when a vehicle is detected.
+
+#### Summary of Major Changes
+1.  **Mode (per-group, `fixed` default):** `groups/{groupId}` gains `schedulingMode: "fixed" | "dynamic"` plus `dynamicConfig {greenSec, allRedSec}`. `fixed` runs the stored turns-loop schedule unchanged; `dynamic` runs the FIFO queue executor. Delivered to the controller via `traffic/group/{groupId}/schedule` and cached in NVS.
+2.  **Detection reuses telemetry (threshold = 1 vehicle):** Any `traffic/device/{deviceId}/telemetry` with live `vehicleCount >= 1` is a detection event. The edge publishes immediately on the `0 → >=1` rising edge plus its normal periodic publish. No new topics.
+3.  **Backend queue gate:** On telemetry, if the group is `dynamic` and the device is RED with `has_queued_schedule == false`, the backend publishes `{"command": "enqueue", "payload": {"deviceId"}}` to `traffic/group/{groupId}/commands` and sets RTDB `/telemetry/{deviceId} {has_queued_schedule: true, queuedAt}`. Non-RED or already-queued telemetry is dropped (dedup). Only the backend writes these flags.
+4.  **Controller FIFO executor:** `enqueue` entries are served FIFO as GREEN (`greenSec`) → all-RED clearance (`allRedSec`) via LoRa (2-channel GREEN/RED relays, no YELLOW). Completion is reported via `traffic/group/{groupId}/telemetry` (`queueDoneDeviceId`, `queueDepth`) so the backend clears `has_queued_schedule`. Empty queue = all-RED idle. Manual overrides still preempt.
+5.  **Offline fallback:** On MQTT loss the controller runs the cached fixed turns-loop via RTC (even for `dynamic` groups, since queueing needs the server) and discards the queue; on reconnect it resyncs and resumes the configured mode.
+
+---
+
 ## [2.3.0] — 2026-10-08
 
 ### Feature: ByteTrack Vehicle Tracking + Line Counting (opt-in)

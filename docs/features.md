@@ -29,6 +29,7 @@
 - Independent intersection operation
 - Centralized monitoring
 - Multi-device coordination
+- Per-group scheduling mode: fixed turns loop or dynamic on-demand queue (all-RED idle, GREEN on vehicle detection)
 
 ## Secure IoT Communication
 

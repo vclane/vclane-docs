@@ -6,8 +6,10 @@ Its primary purpose is to ensure that coordinated traffic light signaling remain
 
 ## Responsibilities
 
-*   **Schedule Synchronization:** Connects to the backend via MQTT to receive updated daily traffic schedules, phase definitions, and coordination configurations. On connect it publishes a schedule request on `traffic/group/{groupId}/schedule-request`; the backend replies on `traffic/group/{groupId}/schedule` with the latest stored schedule, which the controller caches in NVS.
+*   **Schedule Synchronization:** Connects to the backend via MQTT to receive updated schedules (turns loop), the per-group `schedulingMode` (`fixed` | `dynamic`), and coordination configurations. On connect it publishes a schedule request on `traffic/group/{groupId}/schedule-request`; the backend replies on `traffic/group/{groupId}/schedule` with the latest stored schedule, which the controller caches in NVS.
 *   **Signal Override Execution:** Receives real-time manual override commands from operators via the backend and applies them to the active phase calculation immediately.
+*   **Scheduling Mode Execution:** Runs `fixed` (turns-loop round-robin) or `dynamic` (FIFO queue-based on-demand with all-RED idle) per group config.
+*   **Queue Execution (Dynamic Mode):** Maintains a FIFO queue from backend `enqueue` commands; serves each entry as GREEN → all-RED clearance (2-channel GREEN/RED relays); publishes queue-completion notices; idles at all-RED when the queue is empty.
 *   **LoRa Phase Broadcasting:** Computes the active traffic light state for all intersections in its group and broadcasts the target states to the Raspberry Pi actuators via LoRa.
 *   **Offline Resilient Scheduling:** In the event of an internet outage, automatically transitions to offline mode, executing schedules locally using its battery-backed Real-Time Clock (RTC).
 *   **Fallback Status Telemetry:** When edge devices lose internet connection but the controller is online, the ESP-32 publishes the current active traffic light phases of the group to the backend so status remains visible.
@@ -117,18 +119,24 @@ stateDiagram-v2
     Init --> OnlineMode : WiFi & MQTT Connected
     
     state OnlineMode {
-        [*] --> RunCentralSchedule
-        RunCentralSchedule --> ReceiveOverride : MQTT Command Received
-        ReceiveOverride --> RunCentralSchedule : Override Timeout / Cancel
-        RunCentralSchedule --> SyncTime : Periodic NTP Sync
+        [*] --> CheckMode
+        CheckMode --> RunFixed : schedulingMode=fixed
+        CheckMode --> RunQueue : schedulingMode=dynamic
+        RunQueue --> IdleAllRed : queue empty
+        IdleAllRed --> RunQueue : enqueue received
+        RunQueue --> ReceiveOverride : MQTT Override Received
+        ReceiveOverride --> CheckMode : Override Timeout / Cancel
+        RunFixed --> ReceiveOverride : MQTT Command Received
+        ReceiveOverride --> RunFixed : Override Timeout / Cancel
+        CheckMode --> SyncTime : Periodic NTP Sync
     }
     
     OnlineMode --> OfflineMode : MQTT Connection Lost
     
     state OfflineMode {
-        [*] --> RunCachedSchedule
-        RunCachedSchedule --> BroadcastLoRa : Use Local RTC Time
-        BroadcastLoRa --> RunCachedSchedule
+        [*] --> RunCachedFixed
+        RunCachedFixed --> BroadcastLoRa : Use Local RTC Time
+        BroadcastLoRa --> RunCachedFixed
     }
     
     OfflineMode --> OnlineMode : WiFi & MQTT Restored
@@ -137,12 +145,40 @@ stateDiagram-v2
 ### Transition & Fallback Details
 
 1.  **Time Synchronization:** While online, the ESP-32 regularly syncs its internal clock with NTP servers and updates the hardware DS3231 RTC. When offline, it relies entirely on the DS3231 RTC.
-2.  **Schedule Caching:** Daily schedule profiles and coordination phase plans are saved in the ESP-32's Non-Volatile Storage (NVS). When connection is lost, it falls back to the plan corresponding to the current time retrieved from the RTC.
-3.  **Connection Recovery:** The ESP-32 executes connection retry attempts in a background thread, ensuring that failure to connect to WiFi/MQTT does not block the primary LoRa broadcasting task.
+2.  **Schedule Caching:** Schedule configs (turns loop, `schedulingMode`, `dynamicConfig`) and the LoRa `seq` counter are saved in the ESP-32's Non-Volatile Storage (NVS). When connection is lost, the controller falls back to the cached **fixed turns loop** via RTC — even if the group was in dynamic mode, since server-mediated queueing is unavailable offline. Queued entries are discarded on fallback.
+3.  **Connection Recovery:** The ESP-32 executes connection retry attempts in a background thread, ensuring that failure to connect to WiFi/MQTT does not block the primary LoRa broadcasting task. On reconnect it resyncs the schedule, clears the queue, and resumes the configured online mode (all-RED idle if dynamic and empty).
 
 ### Schedule Execution Model
 
-Schedules are a repeating loop of turns, each holding a per-device phase set for a fixed duration (in seconds) before advancing to the next turn; after the last turn the loop wraps to turn 1. Phase values are the simple signal lamp states `RED`, `GREEN`, `YELLOW`. The controller runs the loop continuously and broadcasts the active phase set to the edge devices via LoRa.
+**Fixed mode (`schedulingMode: "fixed"`, default):** Schedules are a repeating loop of turns, each holding a per-device phase set for a fixed duration (in seconds) before advancing to the next turn; after the last turn the loop wraps to turn 1. Phase values are the simple signal lamp states `RED`, `GREEN`, `YELLOW`. The controller runs the loop continuously and broadcasts the active phase set to the edge devices via LoRa.
+
+**Dynamic mode (`schedulingMode: "dynamic"`):** Queue-based on-demand scheduling using `dynamicConfig {greenSec, allRedSec}` (2-channel GREEN/RED relays — no YELLOW phase):
+
+1.  **Idle:** Broadcast all-RED to every device in the group (1-second heartbeat unchanged).
+2.  **Enqueue:** On `{"command": "enqueue", "payload": {"deviceId"}}` via `traffic/group/{groupId}/commands`, push `deviceId` to the in-RAM FIFO queue (backed to NVS) if it is not already queued and not currently GREEN. Duplicates are dropped.
+3.  **Serve (FIFO):** Pop the head → LoRa broadcast GREEN for that device + RED for all others for `greenSec` → all-RED clearance for `allRedSec` (burst 3 packets on each phase change, same `seq` semantics as the fixed loop).
+4.  **Complete:** Publish queue completion via `traffic/group/{groupId}/telemetry` with `queueDoneDeviceId` + `queueDepth` so the backend clears `has_queued_schedule` in RTDB. Serve the next head, or return to all-RED idle when empty.
+5.  **Detection threshold:** 1 vehicle — any edge telemetry with live `vehicleCount >= 1` is a detection event (gated server-side by RED + not-already-queued).
+6.  **Overrides win:** A manual `signal_override` / `cancel_override` preempts the queue per the envelope below; the queue resumes after override expiry/cancel.
+
+```mermaid
+sequenceDiagram
+    participant A as Edge A
+    participant S as Backend
+    participant C as Controller
+    participant B as Edge B
+    A->>S: telemetry(A, vehicleCount=1, RED)
+    S->>S: RED + has_queued=false? → enqueue
+    S->>C: commands enqueue(A)
+    C->>A: LoRa GREEN(A) / RED(B)
+    B->>S: telemetry(B, vehicleCount=1, RED)
+    S->>C: commands enqueue(B)
+    C->>A: LoRa all-RED clearance
+    C->>S: telemetry queueDone(A)
+    C->>B: LoRa GREEN(B)
+    C->>S: telemetry queueDone(B)
+    C->>A: LoRa all-RED idle
+```
 
 ## Implementation Notes
 
@@ -150,6 +186,7 @@ Reference implementation decisions (see changelog 2.1.1):
 
 - **MQTT version:** The controller connects with **MQTT 3.1.1** over TLS (PubSubClient). The broker is v5-capable; no v5-only features are used.
 - **Group commands** (`traffic/group/{groupId}/commands`) use the envelope `{"command": "signal_override", "payload": {"phases": {...}, "durationSeconds": N}}` or `{"command": "cancel_override", "payload": {}}`. `durationSeconds <= 0` is indefinite. An active override pauses the turn-loop and uses the override phases in its place; on expiry/cancel it resumes the same turn it paused on but restarts that turn's full duration from the beginning — remaining time is not preserved.
+- **Queue commands (dynamic mode):** `{"command": "enqueue", "payload": {"deviceId": "..."}}` pushes one FIFO entry (dup-suppressed). After each serve the controller publishes `traffic/group/{groupId}/telemetry` with `queueDoneDeviceId` + `queueDepth` for the backend to clear `has_queued_schedule`.
 - **Fallback telemetry:** the controller publishes `traffic/group/{groupId}/telemetry` every **10 s** with `isFallback: true`, since it cannot observe edge-device connectivity directly. Heartbeat (`traffic/group/{groupId}/heartbeat`) is published every **30 s** (groupId, uptime, timestamp).
 - **LoRa burst:** a phase change sends a **burst of 3 packets** retransmitting the *same logical packet* (identical `seq`); the regular heartbeat broadcast is 1 packet per second. Receivers reject duplicates/stale packets by `seq`. `seq` is persisted to NVS on each phase change so deduplication survives a controller reboot.
 - **Provisioning:** WiFi, MQTT broker + CA cert, group ID, and LoRa frequency are written to NVS via a serial-console wizard on first boot.

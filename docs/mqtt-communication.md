@@ -4,9 +4,10 @@ MQTT provides the real-time communication channel between the backend, the ESP-3
 
 ## Responsibilities
 
-- Deliver timing schedules and manual overrides to ESP-32 Traffic Controllers
-- Receive AI traffic telemetry from Raspberry Pi Edge Devices (live + cumulative vehicle counts, per-direction / per-class breakdowns, congestion status, active traffic light phase)
-- Receive fallback traffic light phase telemetry from ESP-32 Traffic Controllers when edge devices are offline
+- Deliver timing schedules (turns loop + scheduling mode) and manual overrides to ESP-32 Traffic Controllers
+- Deliver per-device queue `enqueue` commands to ESP-32 Traffic Controllers (dynamic mode)
+- Receive AI traffic telemetry from Raspberry Pi Edge Devices (live + cumulative vehicle counts, per-direction / per-class breakdowns, congestion status, active traffic light phase) — live `vehicleCount >= 1` doubles as the vehicle-detection trigger in dynamic mode
+- Receive fallback traffic light phase telemetry + queue-completion notices from ESP-32 Traffic Controllers
 - Receive connection heartbeats and device health stats from all devices
 - Maintain persistent, low-latency connections over TLS
 
@@ -35,13 +36,15 @@ traffic/
 
     group/                  # ESP-32 Traffic Controllers
         {groupId}/
-            commands        # Subscribe to manual override and cycle signals
-            schedule        # Subscribe to daily schedule configurations
+            commands        # Subscribe to overrides, cancel, and queue enqueue commands
+            schedule        # Subscribe to schedule configs (turns loop + schedulingMode + dynamicConfig)
             schedule-request# Publish a request for the latest schedule on connect
-            telemetry       # Publish fallback traffic light active phases
+            telemetry       # Publish fallback phases + queue-done completion notices
             heartbeat       # Publish controller heartbeat
             status          # LWT online/offline
 ```
+
+> No new topics are used for dynamic scheduling — existing telemetry/command topics are reused with extended payloads (see below).
 
 ## Technology Stack
 
@@ -97,6 +100,32 @@ traffic/
 `durationSeconds <= 0` is indefinite. While an override is active the controller pauses the schedule turn-loop and uses the override phases in its place; when the override ends (expiry or cancel) it resumes the same turn it paused on but restarts that turn's full duration from the beginning — remaining time is not preserved.
 
 **Schedule Sync on Connect** — On connection, the ESP-32 publishes an empty message to `traffic/group/{groupId}/schedule-request`. The backend responds on `traffic/group/{groupId}/schedule` with the stored schedule, keeping the controller's cached copy (and offline NVS fallback) in sync without periodic polling.
+
+**Dynamic Queue Scheduling (reused topics, no new topics)** — Applies when the group's `schedulingMode` is `"dynamic"`:
+
+- **Detection (Edge → Backend):** Reuses `traffic/device/{deviceId}/telemetry`. Telemetry with live `vehicleCount >= 1` (threshold = 1 vehicle) is a detection event. The edge publishes immediately on the `0 → >=1` rising edge, plus its normal periodic publish.
+- **Enqueue (Backend → Controller):** Reuses `traffic/group/{groupId}/commands` with the standard envelope:
+
+```json
+{ "command": "enqueue", "payload": { "deviceId": "intersection-01" } }
+```
+
+- **Queue completion (Controller → Backend):** Reuses `traffic/group/{groupId}/telemetry` with two extra fields:
+
+```json
+{
+  "groupId": "group-01",
+  "activePhases": [
+    { "deviceId": "intersection-01", "phase": "RED" },
+    { "deviceId": "intersection-02", "phase": "RED" }
+  ],
+  "queueDoneDeviceId": "intersection-01",
+  "queueDepth": 1,
+  "timestamp": "2026-07-24T10:00:20Z"
+}
+```
+
+`queueDoneDeviceId` tells the backend to clear `has_queued_schedule` for that device in RTDB. `queueDepth` is the remaining FIFO depth after completion. When the queue is empty the controller broadcasts all-RED.
 
 **Device Monitoring** — Online/offline tracking for all hardware via LWT (Last Will and Testament) topics and connection status reporting.
 

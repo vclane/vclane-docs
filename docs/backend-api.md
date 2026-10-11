@@ -60,7 +60,7 @@ graph TB
 
 **Traffic Monitoring** — Receive real-time telemetry, monitor traffic conditions, store traffic information, generate traffic statistics, detect traffic events.
 
-**Traffic Control** — Send traffic signal commands, trigger manual overrides, manage intersection schedules, coordinate multiple intersections, process command responses.
+**Traffic Control** — Send traffic signal commands, trigger manual overrides, manage intersection schedules (turns loop + per-group `schedulingMode: fixed | dynamic`), coordinate multiple intersections, process command responses. In `dynamic` mode the backend runs a queue gate on edge telemetry (live `vehicleCount >= 1` → `enqueue` when RED + not already queued) and clears RTDB `has_queued_schedule` on controller queue-completion.
 
 **Real-Time Synchronization** — MQTT command publishing, device heartbeat processing, WebSocket client updates, event notifications.
 
@@ -118,4 +118,8 @@ Validation rules:
 1. **Configure:** `POST /api/groups/{id}/schedule` validates the schedule, persists it to Firestore (`groups/{id}.schedule`), and immediately publishes it to `traffic/group/{id}/schedule`.
 2. **Read:** `GET /api/groups/{id}/schedule` returns the stored schedule (404 if none configured).
 3. **On-connect pull:** When a controller connects, it publishes an empty message to `traffic/group/{id}/schedule-request`. The backend replies on `traffic/group/{id}/schedule` with the stored schedule, keeping the controller's cached copy (and its offline NVS fallback) in sync without periodic polling.
-4. **Execution:** The ESP-32 holds each turn for `durationSeconds`, advancing through the loop continuously, and broadcasts the active phase set over LoRa to the group's edge devices.
+4. **Execution:** In `fixed` mode (default) the ESP-32 holds each turn for `durationSeconds`, advancing through the loop continuously, and broadcasts the active phase set over LoRa to the group's edge devices. In `dynamic` mode it instead runs the FIFO queue executor (all-RED idle, GREEN on demand per `dynamicConfig`) — see [Traffic Controller](traffic-controller.md).
+
+### Scheduling Mode
+
+Each group has a `schedulingMode` (`"fixed"` default | `"dynamic"`) stored on the group document alongside the turns-loop `schedule` and the `dynamicConfig {greenSec, allRedSec}` timings. The mode travels inside the `traffic/group/{groupId}/schedule` payload so the controller can switch executors without reflashing; offline it always falls back to the cached fixed turns loop.
