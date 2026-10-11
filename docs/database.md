@@ -68,18 +68,22 @@ This path is updated on every heartbeat and telemetry message from the edge devi
 
 | Field             | Type            | Source              | Description                                                                                       |
 | ----------------- | --------------- | ------------------- | ------------------------------------------------------------------------------------------------- |
-| _(device fields)_ | _various_       | Device payload      | Device-specific data (vehicleCount, trafficDensity, cpuUsage, etc.)                               |
+| _(device fields)_ | _various_       | Device payload      | Device-specific data (vehicleCount, vehicleTotal, directionCounts, classCounts, trafficDensity, etc.) |
 | `timestamp`       | `string \| int` | Device payload      | Device-local timestamp                                                                            |
 | `online`          | `bool`          | Injected by backend | `True` — set on every heartbeat or telemetry, `False` — set by goodbye message or timeout checker |
 | `lastSeen`        | `int`           | Injected by backend | Server Unix timestamp of the most recent heartbeat or telemetry                                   |
 
-Example document:
+Example document (tracking enabled):
 
 ```json
 {
   "deviceId": "intersection-01",
-  "vehicleCount": 35,
-  "trafficDensity": "HIGH",
+  "vehicleCount": 12,
+  "vehicleTotal": 148,
+  "directionCounts": { "northbound": 148 },
+  "classCounts": { "car": 9, "truck": 2, "bus": 1 },
+  "trafficDensity": "MODERATE",
+  "currentTrafficLightSignal": "GREEN",
   "timestamp": "2026-07-24T10:00:00Z",
   "online": true,
   "lastSeen": 1721815200

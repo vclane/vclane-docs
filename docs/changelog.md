@@ -4,6 +4,21 @@ This changelog tracks system-wide architectural modifications. Submodule develop
 
 ---
 
+## [2.3.0] — 2026-10-08
+
+### Feature: ByteTrack Vehicle Tracking + Line Counting (opt-in)
+
+Edge devices can now track vehicles across frames with persistent IDs and report real counts instead of mock telemetry.
+
+#### Summary of Major Changes
+1.  **Tracking (opt-in, off by default):** `YOLODetector.track()` runs `model.track(persist=True, tracker=...)` with `bytetrack.yaml`. Enabled via `tracker: "bytetrack.yaml"` (or `--tracker`); disabled via `tracker: null` / `--no-tracker` (detect-only fallback). New `lap` dependency provides ByteTrack association.
+2.  **Counting:** New `VehicleCounter` reports live occupancy (unique IDs visible) plus cumulative line crossings (each `(track_id, line)` counted once on centroid side-change). Lines are normalized 0–1 coords (`counting_lines`, default single `northbound` line); only `count_classes` (default car/truck/bus/motorcycle/bicycle) are counted.
+3.  **Telemetry:** `vehicleCount` = live, plus new `vehicleTotal`, `directionCounts`, `classCounts`. Density thresholds: `LOW <8`, `MODERATE ≤20`, `HIGH ≤30`, `HEAVY >30`. Legacy `random_walk()` mock only applies in detect-only mode. Payload is thread-safe (`set_counts()` / `snapshot()` under lock).
+4.  **Pipeline constraints:** Tracking forces `yolo_interval ≤ 2` (warn + clamp), uses an ordered inference queue (`maxsize=1`, blocking put) to preserve frame sequence, and calls `reset_tracker()` on stream gaps (EOF/reconnect). Annotated RTSP frames show `{label} #{id} {conf}` plus cyan counting lines.
+5.  **Tooling:** `python scripts/test_tracking.py --source <video|0> [--save out.mp4]` for manual ByteTrack verification.
+
+---
+
 ## [2.2.0] — 2026-09-17
 
 ### Feature: 2-Channel Relay Module (GREEN + RED only)

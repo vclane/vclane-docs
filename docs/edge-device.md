@@ -62,19 +62,31 @@ Responsibilities:
 
 - Capture live camera feeds
 - Process frames using OpenCV
-- Perform object detection using YOLO
-- Detect vehicles and pedestrians
-- Calculate traffic density
+- Perform object detection using YOLO (detect-only) or YOLO + ByteTrack (tracking)
+- Track vehicles across frames with persistent IDs (when tracking is enabled)
+- Count vehicles via virtual counting lines (live occupancy + cumulative crossings)
+- Calculate traffic density from live counts
 - Generate traffic statistics
-- Publish live video streams
+- Publish live annotated video streams (boxes + track IDs + counting lines)
 
-Data flow:
+Data flow (tracking enabled):
 
 ```mermaid
 graph TD
     Camera --> OpenCV
-    OpenCV --> YOLO["YOLO Detection"]
-    YOLO --> Analytics["Traffic Analytics"]
+    OpenCV --> TRACK["YOLO + ByteTrack (track, persist=True)"]
+    TRACK --> Counter["VehicleCounter (live + line crossings)"]
+    Counter --> Analytics["Traffic Analytics / Telemetry"]
+    TRACK --> RTSP["RTSP Stream (annotated)"]
+```
+
+Data flow (detect-only, `tracker: null` / `--no-tracker`):
+
+```mermaid
+graph TD
+    Camera --> OpenCV
+    OpenCV --> YOLO["YOLO Detection (no IDs)"]
+    YOLO --> Analytics["Traffic Analytics (mock telemetry)"]
     YOLO --> RTSP["RTSP Stream"]
 ```
 
@@ -91,10 +103,56 @@ Advantages:
 
 Examples:
 
-- Vehicle counting
+- Vehicle counting (live occupancy + cumulative line crossings)
 - Lane occupancy detection
 - Queue length estimation
 - Traffic congestion detection
+- Per-direction and per-class breakdowns
+
+### Vehicle Tracking (YOLO + ByteTrack)
+
+Tracking is **opt-in** and disabled by default (`tracker: null`).
+
+- **Detect-only (default):** `tracker: null` or `vclane-edge run --no-tracker` — plain `YOLO.detect()` per sampled frame, no IDs, no counting. Telemetry falls back to the legacy mock `random_walk()`.
+- **Tracking:** set `tracker: "bytetrack.yaml"` (or `--tracker bytetrack.yaml`) — `YOLODetector.track()` calls `model.track(persist=True, tracker=...)`, preserving Kalman state across frames. Requires the `lap` dependency (`pip install lap` / `uv sync`).
+- Annotated boxes show `{label} #{track_id} {conf:.2f}` (e.g. `car #7 0.82`); counting lines are drawn in cyan with their names.
+- **Frame ordering matters:** tracking uses an ordered inference queue (`maxsize=1`, blocking `put(timeout=0.05)` instead of dropping middle frames). Detect-only uses `maxsize=2` and drops the oldest frame for throughput.
+- **Keep `yolo_interval` at 1–2 when tracking.** Values `> 2` are forced back to `2` with a warning — skipping frames breaks the ByteTrack Kalman state and causes ID switches.
+- **Stream gaps reset IDs:** on EOF / reconnect (`read_frame()` returns `None`), `reset_tracker()` clears ByteTrack state so stale tracks do not leak into the new sequence.
+- Verify manually with `python scripts/test_tracking.py --source <video|0> [--save out.mp4]` (defaults: `--model models/best.pt --conf 0.4 --imgsz 416 --tracker bytetrack.yaml`).
+
+CLI flags:
+
+| Flag | Description |
+| ---- | ----------- |
+| `--tracker <yaml>` | Tracker config (e.g. `bytetrack.yaml`); empty string disables tracking |
+| `--no-tracker` | Disable tracking (detect-only, no IDs/counting) |
+| `--yolo-interval <N>` | Run YOLO every N frames (1–2 recommended for tracking) |
+
+### Vehicle Counting (VehicleCounter)
+
+`src/vclane_edge/counter.py` layers counting on top of ByteTrack IDs. It reports two complementary counts:
+
+- **Live occupancy** — unique tracked IDs currently visible (drives `vehicleCount` and `trafficDensity` / congestion).
+- **Cumulative line crossings** — each `(track_id, line)` pair counted at most once (drives `vehicleTotal` and `directionCounts`).
+
+How it works:
+
+- Counting lines are stored **normalized (0–1)** so they survive resolution changes, e.g. `{"name": "northbound", "p1": [0.05, 0.5], "p2": [0.95, 0.5]}`. Defaults to a single `northbound` mid-frame line; configure via `counting_lines`.
+- A crossing registers when a track's **centroid changes signed side** of a directed line `p1 → p2` between consecutive updates (strict sign change; on-line `== 0` is ignored to avoid jitter counts).
+- Only `count_classes` (default `["car", "truck", "bus", "motorcycle", "bicycle"]`) are counted — pedestrians and other labels are tracked/annotated but excluded from counts.
+- Loitering / stop-and-go at a red light does not inflate totals: each ID counts once per line.
+- Disappeared tracks have their centroid history pruned eagerly to bound memory (ByteTrack keeps them alive for `track_buffer` frames internally).
+- Per-frame `by_class` in telemetry is the **live** per-class breakdown, not cumulative.
+
+Density thresholds (applied to live count in `set_counts()`):
+
+| Live count | Density |
+| ---------- | ------- |
+| `< 8` | `LOW` |
+| `≤ 20` | `MODERATE` |
+| `≤ 30` | `HIGH` |
+| `> 30` | `HEAVY` |
 
 ## Local Decision Making and Actuation
 
@@ -112,27 +170,32 @@ The edge device maintains a persistent MQTT connection to the backend when inter
 
 Responsibilities:
 
-- Publish AI traffic telemetry (vehicle count, traffic density)
+- Publish AI traffic telemetry (live count, cumulative total, per-direction / per-class breakdowns, traffic density)
 - Report the currently actuated traffic light phase (from LoRa) or caution state
 - Send heartbeat updates (process uptime and timestamp)
 
-Example telemetry:
+Example telemetry (tracking enabled):
 
 ```json
 {
   "deviceId": "intersection-01",
-  "vehicleCount": 35,
-  "trafficDensity": "HIGH",
+  "vehicleCount": 12,
+  "vehicleTotal": 148,
+  "directionCounts": { "northbound": 148 },
+  "classCounts": { "car": 9, "truck": 2, "bus": 1 },
+  "trafficDensity": "MODERATE",
   "currentTrafficLightSignal": "GREEN",
   "timestamp": "2026-07-24T10:00:00Z"
 }
 ```
 
+Detect-only mode (no tracker) omits real counts and falls back to the mock `vehicleCount` random walk; `vehicleTotal` stays `0` with empty `directionCounts` / `classCounts`.
+
 ## Device Monitoring
 
 Each edge device periodically reports its status to the backend over MQTT:
 
-- **Telemetry** (`traffic/device/{deviceId}/telemetry`): current vehicle count, traffic density, and the active traffic light signal (or `CAUTION` during fallback)
+- **Telemetry** (`traffic/device/{deviceId}/telemetry`): live vehicle count, cumulative total, per-direction counts, per-class counts, traffic density, and the active traffic light signal (or `CAUTION` during fallback)
 - **Heartbeat** (`traffic/device/{deviceId}/heartbeat`): process uptime and timestamp
 
 ## Software Architecture
@@ -148,12 +211,15 @@ vclane-edge/
 │   ├── device.py            # VclaneEdgeDevice orchestrator
 │   ├── mqtt.py              # MQTT client (publish/subscribe)
 │   ├── video.py             # Video pipeline (3 modes)
-│   ├── yolo.py              # YOLO detection wrapper
-│   ├── telemetry.py         # Mock telemetry state
+│   ├── yolo.py              # YOLO detection + ByteTrack wrapper (track/reset_tracker/annotate)
+│   ├── counter.py           # VehicleCounter + CountingLine (live + line-crossing counts)
+│   ├── telemetry.py         # Telemetry state (set_counts / random_walk fallback)
 │   ├── lora.py              # LoRa receiver (ESP-32 phase broadcasts)
 │   ├── relay.py             # Relay actuation + caution fallback
 │   └── registration.py      # Provisioning flow
-├── pyproject.toml            # uv-managed deps
+├── scripts/
+│   └── test_tracking.py     # Manual ByteTrack verification (--source <video|0> [--save out.mp4])
+├── pyproject.toml            # uv-managed deps (includes `lap` for ByteTrack association)
 ├── Dockerfile                # Multi-stage container
 └── docker-compose.yml        # Edge device service
 ```
@@ -186,9 +252,17 @@ Example `config.json`:
   "mqtt_host": "10.0.0.5",
   "mqtt_port": 8883,
   "mqtt_tls": true,
-  "api_url": "https://vclane.example.com"
+  "api_url": "https://vclane.example.com",
+  "tracker": "bytetrack.yaml",
+  "yolo_interval": 1,
+  "counting_lines": [
+    { "name": "northbound", "p1": [0.05, 0.5], "p2": [0.95, 0.5] }
+  ],
+  "count_classes": ["car", "truck", "bus", "motorcycle", "bicycle"]
 }
 ```
+
+Set `"tracker": null` (or pass `--no-tracker`) for detect-only mode. An empty-string `tracker` is normalized to `null`.
 
 ### Video Pipeline Modes
 
@@ -216,8 +290,8 @@ Auto-registration at `vclane-edge run` start occurs when `device_id` or `device_
 | Operating System            | Raspberry Pi OS / Linux        |
 | Programming Language        | Python                         |
 | Video Processing            | OpenCV                         |
-| AI Detection Model          | YOLO Object Detection          |
-| AI Runtime                  | Ultralytics YOLO (PyTorch)     |
+| AI Detection Model          | YOLO Object Detection + ByteTrack multi-object tracking |
+| AI Runtime                  | Ultralytics YOLO (PyTorch) + `lap` (ByteTrack association) |
 | Camera Interface            | CSI Camera / USB Camera        |
 | Local Wireless Receiver     | LoRa SX1276 / SX1278 Module    |
 | Local Control Protocol      | SPI (Pi to LoRa) / LoRa Radio  |
@@ -229,7 +303,7 @@ Auto-registration at `vclane-edge run` start occurs when `device_id` or `device_
 
 ## Key Features
 
-**AI-Based Traffic Analysis** — Vehicle detection, pedestrian detection, traffic density estimation, lane occupancy detection, queue length estimation, congestion detection.
+**AI-Based Traffic Analysis** — Vehicle detection, ByteTrack multi-object tracking with persistent IDs, vehicle counting (live occupancy + cumulative line crossings), per-direction / per-class breakdowns, pedestrian detection, traffic density estimation, lane occupancy detection, queue length estimation, congestion detection.
 
 **Local Edge Processing** — Performs AI inference locally, reduces bandwidth consumption, provides faster response time, minimizes cloud processing requirements.
 
@@ -237,6 +311,6 @@ Auto-registration at `vclane-edge run` start occurs when `device_id` or `device_
 
 **Fault Tolerant Safety Fallback** — Reverts to all relays off/local caution mode if LoRa control signals are lost or corrupted, ensuring driver safety.
 
-**Device Monitoring** — Periodic telemetry (vehicle count, traffic density, active signal) and heartbeat reporting (uptime, timestamp).
+**Device Monitoring** — Periodic telemetry (live count, cumulative total, per-direction / per-class counts, traffic density, active signal) and heartbeat reporting (uptime, timestamp).
 
 **Secure Backend Communication** — Device heartbeat reporting, telemetry publishing, remote configuration updates.

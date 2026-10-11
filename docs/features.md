@@ -2,7 +2,10 @@
 
 ## AI-Powered Traffic Intelligence
 
-- Real-time object detection
+- Real-time object detection (YOLO)
+- Multi-object tracking with persistent IDs (ByteTrack, opt-in)
+- Vehicle counting: live occupancy + cumulative line crossings
+- Per-direction and per-class traffic breakdowns
 - Automated traffic analysis
 - Congestion detection
 - Traffic pattern monitoring
@@ -16,8 +19,8 @@
 
 ## Real-Time Monitoring
 
-- Live camera streaming
-- Device telemetry
+- Live camera streaming (annotated with boxes, track IDs, counting lines)
+- Device telemetry (live/total counts, density, signal state)
 - Traffic analytics
 - Intersection status
 

@@ -137,7 +137,7 @@ No `autoDispose` is used — all providers are global singletons for the app lif
 | `User`           | id, email, displayName, role ('operator')                                     |
 | `Device`         | id, name, location, status (online/offline/warning), firmwareVersion, rtspUrl |
 | `Group`          | id, name, description, location                                               |
-| `Telemetry`      | vehicleCount, currentTrafficLightSignal, timestamp                            |
+| `Telemetry`      | vehicleCount, vehicleTotal, directionCounts, classCounts, trafficDensity, currentTrafficLightSignal, timestamp |
 | `SignalOverride` | deviceId, targetSignal, requestedAt                                           |
 
 > **Note:** Online/offline state and last-seen timestamps are tracked in the Realtime Database at `/telemetry/{deviceId}`, not in Firestore. The `online` field is set to `true` on every heartbeat or telemetry, and `false` via goodbye message, LWT, or background timeout checker. This avoids excessive Firestore writes from frequent updates.
