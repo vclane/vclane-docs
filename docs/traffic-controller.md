@@ -10,7 +10,7 @@ Its primary purpose is to ensure that coordinated traffic light signaling remain
 *   **Signal Override Execution:** Receives real-time manual override commands from operators via the backend and applies them to the active phase calculation immediately.
 *   **Scheduling Mode Execution:** Runs `fixed` (turns-loop round-robin) or `dynamic` (FIFO queue-based on-demand with all-RED idle) per group config.
 *   **Queue Execution (Dynamic Mode):** Maintains a FIFO queue from backend `enqueue` commands; serves each entry as GREEN → all-RED clearance (2-channel GREEN/RED relays); publishes queue-completion notices; idles at all-RED when the queue is empty.
-*   **LoRa Phase Broadcasting:** Computes the active traffic light state for all intersections in its group and broadcasts the target states to the Raspberry Pi actuators via LoRa.
+*   **LoRa Phase Broadcasting:** Computes the active traffic light state for all intersections in its group and broadcasts the target states to the Raspberry Pi actuators via LoRa (default) or the MQTT `traffic/group/{groupId}/phase` topic — see Phase Sync Transport below.
 *   **Offline Resilient Scheduling:** In the event of an internet outage, automatically transitions to offline mode, executing schedules locally using its battery-backed Real-Time Clock (RTC).
 *   **Fallback Status Telemetry:** When edge devices lose internet connection but the controller is online, the ESP-32 publishes the current active traffic light phases of the group to the backend so status remains visible.
 *   **Status & Heartbeat Reporting:** Publishes its own connection status and health parameters to the backend.
@@ -77,6 +77,18 @@ The DS3231 connects to the ESP-32 over I2C and is backed by a coin-cell battery 
 ## LoRa Communication Specification
 
 LoRa communication operates locally in a broadcast-only topology from the ESP-32 Traffic Controller (Master) to the Raspberry Pi Edge Devices (Slaves) within a localized group.
+
+### Phase Sync Transport (`sync_transport`)
+
+Provisioned via the serial wizard (`lora` default) and stored in NVS:
+
+| Value | LoRa broadcast | MQTT `traffic/group/{gid}/phase` (QoS 1, retained) |
+| ----- | -------------- | --------------------------------------------------- |
+| `lora` | yes | no |
+| `mqtt` | no | yes (only while online) |
+| `dual` | yes | yes |
+
+MQTT uses the identical JSON frame as LoRa (same `seq` counter, 1/sec heartbeat + 3x burst on change). `mqtt` mode needs no LoRa wiring but has no offline phase sync — without broker connectivity the edge enters caution.
 
 ### Radio Configuration
 

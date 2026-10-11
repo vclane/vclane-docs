@@ -39,6 +39,7 @@ traffic/
             commands        # Subscribe to overrides, cancel, and queue enqueue commands
             schedule        # Subscribe to schedule configs (turns loop + schedulingMode + dynamicConfig)
             schedule-request# Publish a request for the latest schedule on connect
+            phase           # Controller publishes phase-sync frames (MQTT alt to LoRa); edge subscribes
             telemetry       # Publish fallback phases + queue-done completion notices
             heartbeat       # Publish controller heartbeat
             status          # LWT online/offline
@@ -129,4 +130,22 @@ traffic/
 
 **Device Monitoring** — Online/offline tracking for all hardware via LWT (Last Will and Testament) topics and connection status reporting.
 
-**Traffic Synchronization** — Coordinated intersection timing is managed locally within each group by the ESP-32 Traffic Controller via LoRa radio broadcasts, eliminating the need for complex, latency-sensitive multi-device MQTT coordination protocols.
+**Traffic Synchronization** — Coordinated intersection timing is managed locally within each group by the ESP-32 Traffic Controller via LoRa radio broadcasts by default, eliminating the need for complex, latency-sensitive multi-device MQTT coordination protocols.
+
+## Phase Sync via MQTT (LoRa Alternative)
+
+When `sync_transport` is `mqtt` or `dual`, the controller publishes the same phase frame as the LoRa packet to `traffic/group/{groupId}/phase` with **QoS 1, retained** — 1/sec heartbeat plus a burst of 3 identical-`seq` frames on every phase change. Edge devices subscribe to their group's phase topic and feed frames into the same `seq`-dedup state as LoRa (first-valid wins in `dual` mode).
+
+```json
+{
+  "gid": "group-01",
+  "seq": 10542,
+  "ts": 1782806400,
+  "p": { "intersection-01": "GREEN", "intersection-02": "RED" },
+  "ttl": 15
+}
+```
+
+- Broker ACL: controller role may `publishClientSend traffic/group/%u/phase`; device role may `subscribePattern` / `publishClientReceive` / `unsubscribePattern traffic/group/+/phase`.
+- The backend ignores this topic (no subscription change needed).
+- Unlike LoRa, MQTT phase sync requires broker connectivity — if the broker is unreachable past the phase timeout, edge devices enter caution mode.

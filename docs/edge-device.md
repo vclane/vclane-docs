@@ -2,9 +2,23 @@
 
 Each intersection contains an independent Raspberry Pi-based edge device acting as the intelligent edge computing unit. It performs video processing, AI inference, traffic analysis, device communication, and local decision-making.
 
+## Phase Sync Transport (`sync_transport`)
+
+Phase frames (`{gid, seq, ts, p, ttl}`) can arrive via LoRa radio (default) or via the MQTT `traffic/group/{groupId}/phase` topic (QoS 1, retained) — both feed one shared `seq`-dedup state (first-valid wins).
+
+| `sync_transport` | Behavior |
+| ---------------- | -------- |
+| `lora` (default) | LoRa receiver only; needs SX1276/SX1278 wiring below |
+| `mqtt` | MQTT phase subscription only; no LoRa hardware needed, but requires broker connectivity |
+| `dual` | Accepts either transport; useful for migration |
+
+- Set via config `sync_transport` or CLI `--sync-transport`.
+- The caution fallback (`lora_timeout`, default 5 s without any valid phase packet) applies to both transports.
+- In `mqtt`/`dual` modes the existing MQTT connection gains one extra subscription; no new credentials.
+
 ## Hardware Wiring
 
-An intersection node connects three peripherals to the Raspberry Pi: the **LoRa receiver** (listens for phase broadcasts from the group's ESP-32 Traffic Controller), the **relay board** (drives the green/red signal lamps), and the **camera** (feeds the video/YOLO pipeline).
+An intersection node connects up to three peripherals to the Raspberry Pi: the **LoRa receiver** (listens for phase broadcasts from the group's ESP-32 Traffic Controller — only needed when `sync_transport` is `lora`/`dual`), the **relay board** (drives the green/red signal lamps), and the **camera** (feeds the video/YOLO pipeline).
 
 ```mermaid
 graph TD
@@ -160,9 +174,9 @@ Under the grouped architecture, the Raspberry Pi Edge Device functions as the ph
 
 Key behaviors:
 
-- **LoRa Packet Reception:** The Raspberry Pi continuously listens for LoRa broadcast signals containing the target active phases.
+- **Phase Reception:** The Raspberry Pi listens for phase broadcasts via the configured `sync_transport` — LoRa packets and/or MQTT `traffic/group/{groupId}/phase` frames containing the target active phases.
 - **Relay Actuation:** It parses the received command (e.g., active phase, green/red light configurations) and controls the physical relays to update the signal lamps.
-- **Resilient Fallback:** If the LoRa broadcast signal is lost (e.g., ESP-32 hardware failure), the Raspberry Pi falls back to a pre-programmed local safety routine (such as all relays off for caution) to prevent unsafe signal states.
+- **Resilient Fallback:** If the phase signal is lost (LoRa out of range / ESP-32 failure, or MQTT broker unreachable in `mqtt` mode), the Raspberry Pi falls back to a pre-programmed local safety routine (such as all relays off for caution) to prevent unsafe signal states.
 
 ## Backend Communication
 
@@ -310,9 +324,9 @@ Auto-registration at `vclane-edge run` start occurs when `device_id` or `device_
 
 **Local Edge Processing** — Performs AI inference locally, reduces bandwidth consumption, provides faster response time, minimizes cloud processing requirements.
 
-**LoRa-Driven Signal Actuation** — Receives synchronized traffic light phase commands from the group's ESP-32 Traffic Controller via LoRa, driving the physical green/red relays.
+**LoRa-Driven Signal Actuation** — Receives synchronized traffic light phase commands from the group's ESP-32 Traffic Controller via LoRa (default) or MQTT phase topic, driving the physical green/red relays.
 
-**Fault Tolerant Safety Fallback** — Reverts to all relays off/local caution mode if LoRa control signals are lost or corrupted, ensuring driver safety.
+**Fault Tolerant Safety Fallback** — Reverts to all relays off/local caution mode if phase control signals are lost or corrupted, ensuring driver safety.
 
 **Device Monitoring** — Periodic telemetry (live count, cumulative total, per-direction / per-class counts, traffic density, active signal) and heartbeat reporting (uptime, timestamp).
 
