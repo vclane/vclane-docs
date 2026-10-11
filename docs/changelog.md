@@ -4,6 +4,19 @@ This changelog tracks system-wide architectural modifications. Submodule develop
 
 ---
 
+## [Unreleased]
+
+### Feature: Automatic Emergency-Vehicle Signal Override (edge-initiated)
+
+Edge devices now request a signal override automatically when YOLO detects an emergency vehicle, reusing the existing group-commands endpoint so no server change is needed.
+
+#### Summary of Major Changes
+1.  **Telemetry:** new `emergencyVehicleDetected` (`bool`), `emergencyClass` (`string`), `emergencyConfidence` (`number`) fields on every edge telemetry payload (and RTDB `/telemetry/{deviceId}`). Set when an `emergency_classes` label is visible, cleared after `emergency_clear_s` without a sighting.
+2.  **Detection (edge-only):** `emergency_classes` (`ambulance`, `fire truck`, `police car` default) above `emergency_confidence` for `emergency_min_frames` consecutive sightings. One request per distinct vehicle (ByteTrack ID; one per presence episode in detect-only mode).
+3.  **Override request:** `POST /api/groups/{id}/commands` with `{"command": "signal_override", "payload": {"phases": {deviceId: "GREEN"}, "durationSeconds": 60}}`. Auth reuses `POST /api/auth/login` with `admin_email` / `admin_password` (env fallback `VCLANE_ADMIN_EMAIL` / `VCLANE_ADMIN_PASSWORD`). No `cancel_override` — the override expires naturally. Global `emergency_cooldown_s` (60 s default) suppresses redundant POSTs.
+
+---
+
 ## [2.4.0] — 2026-10-11
 
 ### Feature: Dynamic Queue-Based Scheduling (per-group, opt-in)
