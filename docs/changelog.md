@@ -4,6 +4,19 @@ This changelog tracks system-wide architectural modifications. Submodule develop
 
 ---
 
+## [2.8.0] — 2026-10-14
+
+### Track-Only Edge (ByteTrack Default, Detect-Only Removed)
+
+Single inference path: ByteTrack always on when `yolo_enabled`. Breaking removal of the detect-only mode.
+
+#### Summary of Major Changes
+1.  **`tracker` required (default `bytetrack.yaml`):** `tracker: null`, `--no-tracker`, `YOLO.detect()`, and `detect-only` emergency episodes removed. `lap` is mandatory.
+2.  **`yolo_interval` validated 1–2** (config-level clamp; `1` accuracy, `2` perf). Larger skips break the Kalman state.
+3.  **`yolo_enabled: false` retained** as the raw-passthrough escape hatch (no inference; or `stream_mode: direct-ffmpeg`). Migration: delete `tracker: null` / `--no-tracker` from configs.
+
+---
+
 ## [2.7.0] — 2026-10-14
 
 ### No-Count Edge + Queue Trigger on Detections

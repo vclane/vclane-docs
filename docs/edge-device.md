@@ -76,12 +76,12 @@ Responsibilities:
 
 - Capture live camera feeds
 - Process frames using OpenCV
-- Perform object detection using YOLO (detect-only) or YOLO + ByteTrack (tracking)
+- Run YOLO + ByteTrack tracking with persistent IDs
 - Emit one per-vehicle detection event per new tracked ID (first sighting, any YOLO label) with JPEG crop
 - Generate traffic statistics (signal + emergency flag only; no aggregate counts)
 - Publish live annotated video streams (boxes + track IDs)
 
-Data flow (tracking enabled):
+Data flow:
 
 ```mermaid
 graph TD
@@ -92,15 +92,7 @@ graph TD
     TRACK --> RTSP["RTSP Stream (annotated)"]
 ```
 
-Data flow (detect-only, `tracker: null` / `--no-tracker`):
-
-```mermaid
-graph TD
-    Camera --> OpenCV
-    OpenCV --> YOLO["YOLO Detection (no IDs)"]
-    YOLO --> Analytics["Traffic Analytics (signal + emergency flag)"]
-    YOLO --> RTSP["RTSP Stream"]
-```
+Set `yolo_enabled: false` for raw passthrough with no inference (or `stream_mode: direct-ffmpeg`).
 
 ## AI-Based Traffic Analysis
 
@@ -121,15 +113,13 @@ Examples:
 - Traffic congestion detection
 - Per-direction and per-class breakdowns
 
-### Vehicle Tracking (YOLO + ByteTrack)
+### Vehicle Tracking (YOLO + ByteTrack, default)
 
-Tracking is **opt-in** and disabled by default (`tracker: null`).
+Tracking runs with `tracker: "bytetrack.yaml"` out of the box — `YOLODetector.track()` calls `model.track(persist=True, tracker=...)`, preserving Kalman state across frames. Requires the `lap` dependency (`pip install lap` / `uv sync`).
 
-- **Detect-only (default):** `tracker: null` or `vclane-edge run --no-tracker` — plain `YOLO.detect()` per sampled frame, no IDs, no detections. Telemetry stays lean (signal + emergency flag).
-- **Tracking:** set `tracker: "bytetrack.yaml"` (or `--tracker bytetrack.yaml`) — `YOLODetector.track()` calls `model.track(persist=True, tracker=...)`, preserving Kalman state across frames. Requires the `lap` dependency (`pip install lap` / `uv sync`).
 - Annotated boxes show `{label} #{track_id} {conf:.2f}` (e.g. `car #7 0.82`).
-- **Frame ordering matters:** tracking uses an ordered inference queue (`maxsize=1`, blocking `put(timeout=0.05)` instead of dropping middle frames). Detect-only uses `maxsize=2` and drops the oldest frame for throughput.
-- **Keep `yolo_interval` at 1–2 when tracking.** Values `> 2` are forced back to `2` with a warning — skipping frames breaks the ByteTrack Kalman state and causes ID switches.
+- **Frame ordering matters:** an ordered inference queue (`maxsize=1`, blocking `put(timeout=0.05)`) preserves sequence for the Kalman filter.
+- **`yolo_interval` is 1 or 2** (config-validated; `1` = every frame accuracy, `2` = every 2nd frame perf). Larger skips break the Kalman state and cause ID switches.
 - **Stream gaps reset IDs:** on EOF / reconnect (`read_frame()` returns `None`), `reset_tracker()` clears ByteTrack state so stale tracks do not leak into the new sequence.
 - Verify manually with `python scripts/test_tracking.py --source <video|0> [--save out.mp4]` (defaults: `--model models/best.pt --conf 0.4 --imgsz 416 --tracker bytetrack.yaml`).
 
@@ -137,16 +127,15 @@ CLI flags:
 
 | Flag | Description |
 | ---- | ----------- |
-| `--tracker <yaml>` | Tracker config (e.g. `bytetrack.yaml`); empty string disables tracking |
-| `--no-tracker` | Disable tracking (detect-only, no per-vehicle detections) |
-| `--yolo-interval <N>` | Run YOLO every N frames (1–2 recommended for tracking) |
+| `--tracker <yaml>` | Tracker config (default `bytetrack.yaml`) |
+| `--yolo-interval <N>` | Run YOLO every N frames (`1` accuracy, `2` perf) |
 
 ### Per-Vehicle Detection Events (`detection.py`)
 
 `src/vclane_edge/detection.py` layers eventing on top of ByteTrack IDs (no aggregate counts):
 
 - **Trigger** — first sighting of each ByteTrack ID emits one `DetectionEvent` (any YOLO label, unfiltered) with a padded JPEG crop. Seen IDs are remembered until a stream gap resets them.
-- **Upload** — `DetectionUploader` POSTs each event immediately via `POST /api/devices/{id}/detections` (bounded queue, drop-oldest on overflow, retry offline with backoff). Detect-only mode (`track_id=None`) sends no detections.
+- **Upload** — `DetectionUploader` POSTs each event immediately via `POST /api/devices/{id}/detections` (bounded queue, drop-oldest on overflow, retry offline with backoff).
 - **Emergency** — the same tracker debounces `emergency_classes` over `emergency_min_frames` consecutive sightings per vehicle for override requests.
 
 ## Local Decision Making and Actuation
@@ -168,11 +157,11 @@ Responsibilities:
 - Publish lean AI traffic telemetry (emergency-vehicle flag + active signal only; no counts — history lives in `detections`)
 - Report the currently actuated traffic light phase (from LoRa) or caution state
 - Send heartbeat updates (process uptime and timestamp)
-- Submit per-vehicle detections via `POST /api/devices/{id}/detections` (one multipart request per new ByteTrack ID: `trackId`, `class`, `deviceTimestamp`, required `image` crop; bounded queue, hold/retry offline). Detect-only mode sends no detections.
+- Submit per-vehicle detections via `POST /api/devices/{id}/detections` (one multipart request per new ByteTrack ID: `trackId`, `class`, `deviceTimestamp`, required `image` crop; bounded queue, hold/retry offline).
 
 > Dynamic queue gate triggers off `POST /api/devices/{id}/detections` (new-doc only), not telemetry. Dedup is server-side via doc-ID existence + RTDB `has_queued_schedule` — the edge keeps uploading normally and never tracks queue state itself.
 
-Example telemetry (tracking enabled):
+Example telemetry:
 
 ```json
 {
@@ -187,11 +176,9 @@ Example telemetry (tracking enabled):
 
 When an emergency vehicle (`ambulance`, `fire truck`, `police car` by default) is visible, `emergencyVehicleDetected` is `true` with the top-match `emergencyClass` / `emergencyConfidence` (e.g. `"ambulance"`, `0.91`).
 
-Detect-only mode sends the same lean payload with no detections.
-
 ### Emergency Vehicle Override
 
-When YOLO reports an `emergency_classes` label (`ambulance`, `fire truck`, `police car` by default) above `emergency_confidence` for `emergency_min_frames` consecutive sightings, the edge sets the telemetry emergency flag and sends one `signal_override` request per distinct vehicle (tracked by ByteTrack ID; one request per presence episode in detect-only mode) via the existing `POST /api/groups/{id}/commands` endpoint (`durationSeconds: 60` by default, no cancel — the override expires naturally). Auth reuses `POST /api/auth/login` with `admin_email` / `admin_password` (or `VCLANE_ADMIN_EMAIL` / `VCLANE_ADMIN_PASSWORD`). Requires `api_url` + `group_id` + admin credentials; without them the device sets the telemetry flag only. A global `emergency_cooldown_s` (default 60 s) suppresses redundant POSTs while an override is active.
+When YOLO reports an `emergency_classes` label (`ambulance`, `fire truck`, `police car` by default) above `emergency_confidence` for `emergency_min_frames` consecutive sightings, the edge sets the telemetry emergency flag and sends one `signal_override` request per distinct vehicle (ByteTrack ID) via the existing `POST /api/groups/{id}/commands` endpoint (`durationSeconds: 60` by default, no cancel — the override expires naturally). Auth reuses `POST /api/auth/login` with `admin_email` / `admin_password` (or `VCLANE_ADMIN_EMAIL` / `VCLANE_ADMIN_PASSWORD`). Requires `api_url` + `group_id` + admin credentials; without them the device sets the telemetry flag only. A global `emergency_cooldown_s` (default 60 s) suppresses redundant POSTs while an override is active.
 
 ## Device Monitoring
 
@@ -267,7 +254,7 @@ Example `config.json`:
 }
 ```
 
-Set `"tracker": null` (or pass `--no-tracker`) for detect-only mode. An empty-string `tracker` is normalized to `null`.
+`tracker` is required (default `bytetrack.yaml`); `yolo_interval` is validated to 1–2 (`1` accuracy, `2` perf). Set `yolo_enabled: false` (or `stream_mode: direct-ffmpeg`) for raw passthrough with no inference.
 
 `relay_blink_normal` / `relay_blink_override` select the blink count before latching solid (3 on schedule transitions, 5 when the phase frame has `ov: true`); `relay_blink_interval` is the seconds per on/off step.
 
@@ -275,7 +262,7 @@ Set `"tracker": null` (or pass `--no-tracker`) for detect-only mode. An empty-st
 
 | Mode                      | Description                                                            |
 | ------------------------- | ---------------------------------------------------------------------- |
-| `opencv+ffmpeg` (default) | OpenCV capture → YOLO detect → FFmpeg stdin → RTSP                     |
+| `opencv+ffmpeg` (default) | OpenCV capture → YOLO track → FFmpeg stdin → RTSP                     |
 | `direct-ffmpeg`           | Source → FFmpeg → RTSP (no OpenCV/YOLO, pure passthrough)              |
 | `opencv+gstreamer`        | OpenCV capture → YOLO → GStreamer → RTSP (falls back to opencv+ffmpeg) |
 
