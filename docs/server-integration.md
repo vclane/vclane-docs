@@ -125,26 +125,26 @@ The backend connects to Mosquitto as an internal MQTT client to receive telemetr
 
 On connect, the backend subscribes to six wildcard topics plus the Dynamic Security response topic:
 
-| Topic Pattern                       | Handler             | Destination                                                                                                    |
-| ----------------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `traffic/device/+/telemetry`        | `_handle_telemetry` | Writes to RTDB at `/telemetry/{deviceId}` — injects `online: true` and `lastSeen`; runs dynamic queue gate     |
-| `traffic/device/+/heartbeat`        | `_handle_heartbeat` | Same as telemetry (no queue gate)                                                                              |
-| `traffic/device/+/goodbye`          | `_handle_goodbye`   | Sets `online: false` on `/telemetry/{deviceId}`                                                                |
-| `traffic/device/+/acknowledgements` | `_handle_ack`       | Logs the payload — no persistence or callback                                                                  |
-| `traffic/group/+/telemetry`         | `_handle_group_telemetry` | Processes controller `queueDoneDeviceId` → clears `has_queued_schedule`; updates fallback phases          |
-| `traffic/group/+/prepare-response`  | _(no handler)_      | Subscribed but not processed                                                                                   |
+| Topic Pattern                       | Handler                   | Destination                                                                                                |
+| ----------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `traffic/device/+/telemetry`        | `_handle_telemetry`       | Writes to RTDB at `/telemetry/{deviceId}` — injects `online: true` and `lastSeen`; runs dynamic queue gate |
+| `traffic/device/+/heartbeat`        | `_handle_heartbeat`       | Same as telemetry (no queue gate)                                                                          |
+| `traffic/device/+/goodbye`          | `_handle_goodbye`         | Sets `online: false` on `/telemetry/{deviceId}`                                                            |
+| `traffic/device/+/acknowledgements` | `_handle_ack`             | Logs the payload — no persistence or callback                                                              |
+| `traffic/group/+/telemetry`         | `_handle_group_telemetry` | Processes controller `queueDoneDeviceId` → clears `has_queued_schedule`; updates fallback phases           |
+| `traffic/group/+/prepare-response`  | _(no handler)_            | Subscribed but not processed                                                                               |
 
 All inbound handlers parse the topic to extract `deviceId` (third segment) and route accordingly.
 
 ### Publish (Outbound)
 
-| Trigger                           | Topic                          | Payload                                                                                   |
-| --------------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------- |
-| `POST /api/devices/{id}/commands` | `traffic/device/{id}/commands` | `{"command": "...", "payload": {...}}`                                                    |
-| `POST /api/devices/{id}/signal`   | `traffic/device/{id}/commands` | `{"command": "signal_override", "payload": {"targetSignal": "..."}}`                      |
-| `POST /api/groups/{id}/commands`  | `traffic/group/{id}/commands`  | `{"command": "signal_override", "payload": {"phases": {...}, "durationSeconds": N}}`      |
-| `POST /api/groups/{id}/sync`      | `traffic/group/{id}/prepare`   | `{"deviceIds": ["id1", "id2", ...]}`                                                      |
-| Dynamic queue gate (auto)         | `traffic/group/{gid}/commands` | `{"command": "enqueue", "payload": {"deviceId": "..."}}`                                  |
+| Trigger                           | Topic                          | Payload                                                                              |
+| --------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------ |
+| `POST /api/devices/{id}/commands` | `traffic/device/{id}/commands` | `{"command": "...", "payload": {...}}`                                               |
+| `POST /api/devices/{id}/signal`   | `traffic/device/{id}/commands` | `{"command": "signal_override", "payload": {"targetSignal": "..."}}`                 |
+| `POST /api/groups/{id}/commands`  | `traffic/group/{id}/commands`  | `{"command": "signal_override", "payload": {"phases": {...}, "durationSeconds": N}}` |
+| `POST /api/groups/{id}/sync`      | `traffic/group/{id}/prepare`   | `{"deviceIds": ["id1", "id2", ...]}`                                                 |
+| Dynamic queue gate (auto)         | `traffic/group/{gid}/commands` | `{"command": "enqueue", "payload": {"deviceId": "..."}}`                             |
 
 ---
 
@@ -269,19 +269,19 @@ When the controller's FIFO empties it broadcasts all-RED; no backend action is n
 
 ## MQTT Topic Reference
 
-| Direction         | Topic                                  | Publisher   | Consumer              | Payload                                                      |
-| ----------------- | -------------------------------------- | ----------- | --------------------- | ------------------------------------------------------------ |
-| Device → Backend  | `traffic/device/{id}/telemetry`        | Edge device | Backend (→RTDB + queue gate) | Telemetry JSON; live `vehicleCount >= 1` = detection in dynamic mode |
-| Device → Backend  | `traffic/device/{id}/heartbeat`        | Edge device | Backend (→RTDB)       | Arbitrary JSON                                               |
-| Device → Backend  | `traffic/device/{id}/acknowledgements` | Edge device | Backend (logged)      | Arbitrary JSON                                               |
-| Device → Backend  | `traffic/group/{id}/prepare-response`  | Edge device | Backend (unhandled)   | Arbitrary JSON                                               |
-| Controller → Backend | `traffic/group/{id}/schedule-request` | ESP-32 controller | Backend         | Empty (on connect)                                           |
-| Controller → Backend | `traffic/group/{id}/telemetry`      | ESP-32 controller | Backend (→RTDB + queue clear) | Fallback phases + `queueDoneDeviceId`, `queueDepth`   |
-| Controller → Backend | `traffic/group/{id}/heartbeat`      | ESP-32 controller | Backend          | Uptime + timestamp JSON                                      |
-| Backend → Controller | `traffic/group/{id}/schedule`      | Backend     | ESP-32 controller | Schedule JSON (turns loop + schedulingMode + dynamicConfig)  |
-| Backend → Controller | `traffic/group/{id}/commands`      | Backend     | ESP-32 controller | `{"command": str, "payload": {}}` (`signal_override` / `cancel_override` / `enqueue`) |
-| Backend → Device  | `traffic/device/{id}/commands`         | Backend     | Edge device           | `{"command": str, "payload": {}}`                            |
-| Backend → Devices | `traffic/group/{id}/prepare`           | Backend     | Edge devices in group | `{"deviceIds": [str]}`                                       |
+| Direction            | Topic                                  | Publisher         | Consumer                      | Payload                                                                               |
+| -------------------- | -------------------------------------- | ----------------- | ----------------------------- | ------------------------------------------------------------------------------------- |
+| Device → Backend     | `traffic/device/{id}/telemetry`        | Edge device       | Backend (→RTDB + queue gate)  | Telemetry JSON; live `vehicleCount >= 1` = detection in dynamic mode                  |
+| Device → Backend     | `traffic/device/{id}/heartbeat`        | Edge device       | Backend (→RTDB)               | Arbitrary JSON                                                                        |
+| Device → Backend     | `traffic/device/{id}/acknowledgements` | Edge device       | Backend (logged)              | Arbitrary JSON                                                                        |
+| Device → Backend     | `traffic/group/{id}/prepare-response`  | Edge device       | Backend (unhandled)           | Arbitrary JSON                                                                        |
+| Controller → Backend | `traffic/group/{id}/schedule-request`  | ESP-32 controller | Backend                       | Empty (on connect)                                                                    |
+| Controller → Backend | `traffic/group/{id}/telemetry`         | ESP-32 controller | Backend (→RTDB + queue clear) | Fallback phases + `queueDoneDeviceId`, `queueDepth`                                   |
+| Controller → Backend | `traffic/group/{id}/heartbeat`         | ESP-32 controller | Backend                       | Uptime + timestamp JSON                                                               |
+| Backend → Controller | `traffic/group/{id}/schedule`          | Backend           | ESP-32 controller             | Schedule JSON (turns loop + schedulingMode + dynamicConfig)                           |
+| Backend → Controller | `traffic/group/{id}/commands`          | Backend           | ESP-32 controller             | `{"command": str, "payload": {}}` (`signal_override` / `cancel_override` / `enqueue`) |
+| Backend → Device     | `traffic/device/{id}/commands`         | Backend           | Edge device                   | `{"command": str, "payload": {}}`                                                     |
+| Backend → Devices    | `traffic/group/{id}/prepare`           | Backend           | Edge devices in group         | `{"deviceIds": [str]}`                                                                |
 
 ### Mosquitto Dynamic Security
 
@@ -334,11 +334,12 @@ docker compose up -d mosquitto
 
 ## Integration API Endpoints
 
-| Method   | Path                         | Auth     | Purpose                          | Side-Effect                                        |
-| -------- | ---------------------------- | -------- | -------------------------------- | -------------------------------------------------- |
-| `POST`   | `/api/devices`               | JWT      | Create device + provision secret | `add_mosquitto_user()` via Dynamic Security RPC    |
-| `DELETE` | `/api/devices/{id}`          | JWT      | Delete device                    | `remove_mosquitto_user()` via Dynamic Security RPC |
-| `POST`   | `/api/devices/{id}/commands` | JWT      | Send arbitrary command           | MQTT publish to `traffic/device/{id}/commands`     |
-| `POST`   | `/api/devices/{id}/signal`   | JWT      | Override traffic signal          | MQTT publish + Firestore write                     |
-| `POST`   | `/api/groups/{id}/sync`      | JWT      | Trigger group prepare            | MQTT publish to `traffic/group/{id}/prepare`       |
-| `GET`    | `/api/mediamtx/auth`         | _(none)_ | MediaMTX auth callback           | Reads Firestore, bcrypt verify                     |
+| Method   | Path                           | Auth     | Purpose                          | Side-Effect                                                      |
+| -------- | ------------------------------ | -------- | -------------------------------- | ---------------------------------------------------------------- |
+| `POST`   | `/api/devices`                 | JWT      | Create device + provision secret | `add_mosquitto_user()` via Dynamic Security RPC                  |
+| `DELETE` | `/api/devices/{id}`            | JWT      | Delete device                    | `remove_mosquitto_user()` via Dynamic Security RPC               |
+| `POST`   | `/api/devices/{id}/commands`   | JWT      | Send arbitrary command           | MQTT publish to `traffic/device/{id}/commands`                   |
+| `POST`   | `/api/devices/{id}/signal`     | JWT      | Override traffic signal          | MQTT publish + Firestore write                                   |
+| `POST`   | `/api/devices/{id}/detections` | JWT      | Submit per-vehicle detection     | Storage upload + Firestore `detections` write (no MQTT, no RTDB) |
+| `POST`   | `/api/groups/{id}/sync`        | JWT      | Trigger group prepare            | MQTT publish to `traffic/group/{id}/prepare`                     |
+| `GET`    | `/api/mediamtx/auth`           | _(none)_ | MediaMTX auth callback           | Reads Firestore, bcrypt verify                                   |

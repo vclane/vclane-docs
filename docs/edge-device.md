@@ -188,6 +188,7 @@ Responsibilities:
 - Publish telemetry **immediately on vehicle arrival** (live count `0 → >= 1` rising edge) so the backend queue gate can react fast when the group is in `dynamic` mode, plus the normal periodic publish
 - Report the currently actuated traffic light phase (from LoRa) or caution state
 - Send heartbeat updates (process uptime and timestamp)
+- Submit per-vehicle detections via `POST /api/devices/{id}/detections` (one multipart request per ByteTrack line-crossing: `trackId`, `class`, `deviceTimestamp`, required `image` crop; hold/retry offline until the image is available). Detect-only mode sends no detections.
 
 > Detection threshold is 1 vehicle: any telemetry with live `vehicleCount >= 1` is treated by the backend as a detection event when the device's group is in `dynamic` mode (requires tracking enabled for real counts; in detect-only mock mode counts are synthetic). Dedup is server-side via RTDB `has_queued_schedule` — the edge keeps publishing normally and never tracks queue state itself.
 

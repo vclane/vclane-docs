@@ -4,6 +4,19 @@ This changelog tracks system-wide architectural modifications. Submodule develop
 
 ---
 
+## [2.6.0] — 2026-10-14
+
+### Feature: Per-Vehicle Detections in Firestore (via REST)
+
+One Firestore document per detected vehicle for history/insights; mobile queries "vehicles today" directly from Firestore.
+
+#### Summary of Major Changes
+1.  **New collection `detections/{detectionId}`:** `{deviceId, groupId, timestamp (server), deviceTimestamp, trackId, class (any YOLO label), imageUrl (required)}`. Deterministic doc ID `{deviceId}_{trackId}_{deviceTimestamp}` enforces server-side `trackId + deviceTimestamp + deviceId` dedup.
+2.  **Transport is REST, not MQTT:** `POST /api/devices/{id}/detections` (multipart `trackId`, `class`, `deviceTimestamp`, required `image`) with JWT auth → backend Storage upload + Firestore write. Detections bypass Mosquitto and RTDB.
+3.  **RTDB cleanup:** `vehicleToday` removed from `/telemetry/{deviceId}`; today-counts come from `detections` queries. Indexes `(deviceId, timestamp)`, `(groupId, timestamp)`; rules read-only for mobile.
+
+---
+
 ## [2.5.0] — 2026-10-14
 
 ### Feature: Automatic Emergency-Vehicle Signal Override (edge-initiated)

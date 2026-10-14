@@ -47,6 +47,8 @@ traffic/
 
 > No new topics are used for dynamic scheduling — existing telemetry/command topics are reused with extended payloads (see below).
 
+> Per-vehicle detections are **not** sent over MQTT — they go via `POST /api/devices/{id}/detections` (see Backend API). Telemetry below is the live aggregate snapshot only.
+
 ## Technology Stack
 
 | Component      | Technology                        |

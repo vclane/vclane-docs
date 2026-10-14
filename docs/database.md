@@ -4,7 +4,7 @@ VCLane uses two Firebase database services: **Firestore** for persistent structu
 
 ## Firestore
 
-Firestore stores long-lived documents in collections. It is used for device metadata, user profiles, groups, and signal overrides — data that changes infrequently.
+Firestore stores long-lived documents in collections. It is used for device metadata, user profiles, groups, signal overrides, and per-vehicle detections — data that changes infrequently (detections are append-only history written via REST).
 
 ### Collections
 
@@ -61,6 +61,22 @@ Firestore stores long-lived documents in collections. It is used for device meta
 | `requestedAt`  | `Timestamp` | When the override was requested   |
 | `expiresAt`    | `Timestamp` | When the override expires         |
 
+#### `detections/{detectionId}`
+
+One document per detected vehicle, written by the backend when the edge posts to `POST /api/devices/{id}/detections`. Doc ID is deterministic (`{deviceId}_{trackId}_{deviceTimestamp}`) so retries are idempotent and the server-side dedup key (`trackId` + `deviceTimestamp` + `deviceId`) is enforced via existence check.
+
+| Field             | Type        | Description                                              |
+| ----------------- | ----------- | -------------------------------------------------------- |
+| `deviceId`        | `string`    | Source device ID (from REST path)                        |
+| `groupId`         | `string \| null` | Owning group (backend lookup of `devices/{id}.groupId`) |
+| `timestamp`       | `Timestamp` | Server write time — canonical key for "today" queries    |
+| `deviceTimestamp` | `string \| int` | Edge crossing time passthrough (part of dedup key)   |
+| `trackId`         | `int \| string` | ByteTrack ID (part of dedup key)                     |
+| `class`           | `string`    | YOLO label, unfiltered (any class)                       |
+| `imageUrl`        | `string`    | Firebase Storage download URL of the vehicle crop — **required** |
+
+> **Note:** `imageUrl` is required — events without an image are rejected. Mobile queries this collection directly (no REST read path). Required composite indexes: `(deviceId, timestamp DESC)`, `(groupId, timestamp DESC)`. Security rules: signed-in operators may read; writes are backend-only (`write: false`, Admin SDK bypasses rules).
+
 ## Realtime Database (RTDB)
 
 RTDB stores ephemeral, rapidly-changing data. It is used for the latest telemetry snapshot and device online status.
@@ -81,6 +97,8 @@ This path is updated on every heartbeat and telemetry message from the edge devi
 | `queuedAt`             | `int \| null`   | Backend queue gate  | Server Unix timestamp of the last `enqueue`, cleared (`null`) on `queue-done`                     |
 
 > **Note:** `has_queued_schedule` / `queuedAt` are only used when the device's group has `schedulingMode: "dynamic"`. They are written **only by the backend** (set on `enqueue`, cleared on controller `queue-done`); edge devices never write them. They provide dedup: while `has_queued_schedule` is `true`, further `vehicleCount >= 1` telemetry for that device does not trigger another enqueue.
+
+> **Note:** `vehicleToday` has been **removed** from `/telemetry/{deviceId}` and must not be written. "Vehicles detected today" is derived by counting `detections` documents with `timestamp >= startOfDay` — see `detections/{detectionId}` above.
 
 Example document (tracking enabled, dynamically queued):
 
