@@ -85,7 +85,7 @@ RTDB stores ephemeral, rapidly-changing data. It is used for the latest telemetr
 
 #### `/telemetry/{deviceId}`
 
-This path is updated on every heartbeat and telemetry message from the edge device. The payload is an **arbitrary JSON object** from the device, with four fields injected/maintained by the backend:
+This path is updated on every heartbeat and telemetry message from the edge device. Only edge devices write here — the ESP-32 controller's group topic carries queue-completion notices only and does not populate this path. The payload is an **arbitrary JSON object** from the device, with four fields injected/maintained by the backend:
 
 | Field                  | Type            | Source              | Description                                                                                       |
 | ---------------------- | --------------- | ------------------- | ------------------------------------------------------------------------------------------------- |

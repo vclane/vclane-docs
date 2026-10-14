@@ -131,7 +131,7 @@ On connect, the backend subscribes to six wildcard topics plus the Dynamic Secur
 | `traffic/device/+/heartbeat`        | `_handle_heartbeat`       | Same as telemetry (no queue gate)                                                                          |
 | `traffic/device/+/goodbye`          | `_handle_goodbye`         | Sets `online: false` on `/telemetry/{deviceId}`                                                            |
 | `traffic/device/+/acknowledgements` | `_handle_ack`             | Logs the payload — no persistence or callback                                                              |
-| `traffic/group/+/telemetry`         | `_handle_group_telemetry` | Processes controller `queueDoneDeviceId` → clears `has_queued_schedule`; updates fallback phases           |
+| `traffic/group/+/queue-done`        | `_handle_queue_done`      | Processes controller `queueDoneDeviceId` → clears `has_queued_schedule`                                    |
 | `traffic/group/+/prepare-response`  | _(no handler)_            | Subscribed but not processed                                                                               |
 
 All inbound handlers parse the topic to extract `deviceId` (third segment) and route accordingly.
@@ -258,7 +258,7 @@ else:
     RTDB update /telemetry/{deviceId}: {has_queued_schedule: true, queuedAt: now}
 ```
 
-**On `traffic/group/{groupId}/telemetry` with `queueDoneDeviceId`:**
+**On `traffic/group/{groupId}/queue-done` with `queueDoneDeviceId`:**
 
 ```
 RTDB update /telemetry/{queueDoneDeviceId}: {has_queued_schedule: false, queuedAt: null}
@@ -277,7 +277,7 @@ When the controller's FIFO empties it broadcasts all-RED; no backend action is n
 | Device → Backend     | `traffic/device/{id}/acknowledgements` | Edge device       | Backend (logged)              | Arbitrary JSON                                                                        |
 | Device → Backend     | `traffic/group/{id}/prepare-response`  | Edge device       | Backend (unhandled)           | Arbitrary JSON                                                                        |
 | Controller → Backend | `traffic/group/{id}/schedule-request`  | ESP-32 controller | Backend                       | Empty (on connect)                                                                    |
-| Controller → Backend | `traffic/group/{id}/telemetry`         | ESP-32 controller | Backend (→RTDB + queue clear) | Fallback phases + `queueDoneDeviceId`, `queueDepth`                                   |
+| Controller → Backend | `traffic/group/{id}/queue-done`        | ESP-32 controller | Backend (queue clear)         | `queueDoneDeviceId`, `queueDepth`                                                     |
 | Controller → Backend | `traffic/group/{id}/heartbeat`         | ESP-32 controller | Backend                       | Uptime + timestamp JSON                                                               |
 | Backend → Controller | `traffic/group/{id}/schedule`          | Backend           | ESP-32 controller             | Schedule JSON (turns loop + schedulingMode + dynamicConfig)                           |
 | Backend → Controller | `traffic/group/{id}/commands`          | Backend           | ESP-32 controller             | `{"command": str, "payload": {}}` (`signal_override` / `cancel_override` / `enqueue`) |

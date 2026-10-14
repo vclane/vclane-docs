@@ -26,7 +26,7 @@ graph TB
         end
 
         MQTT -->|"Schedules / Overrides"| ESP32
-        ESP32 -->|"Fallback Telemetry / Heartbeat"| MQTT
+        ESP32 -->|"Queue Completion / Heartbeat / Status"| MQTT
 
         Edge1 -->|"Telemetry / Heartbeat"| MQTT
         EdgeN -->|"Telemetry / Heartbeat"| MQTT
@@ -54,4 +54,4 @@ Under standard operating conditions with active internet connectivity:
 In case of connectivity interruptions:
 
 - **Complete Internet Loss:** If the intersection group loses internet connection entirely, the **ESP-32 Traffic Controller** fails over to offline mode. Using its internal battery-backed Real-Time Clock (RTC) and cached schedule, it runs the cached fixed turns loop (even for `dynamic` groups, since server-mediated queueing is unavailable offline) and broadcasts phase assignments via LoRa. The Raspberry Pis continue to receive LoRa signals and actuate the lights, keeping the intersection cluster synchronized. Note: groups running `sync_transport: mqtt` have no offline phase sync — without broker connectivity the edge devices enter caution mode.
-- **Edge Device Connection Loss (Fallback Telemetry):** If a Raspberry Pi Edge Device loses its internet connection but the ESP-32 remains online, the Raspberry Pi is unable to report status to the backend. The ESP-32 acts as a telemetry fallback: it publishes the group's current traffic light phase states to the MQTT broker so the backend maintains visibility of the active signal states.
+- **Edge Device Connection Loss:** If a Raspberry Pi Edge Device loses its internet connection, it is unable to report telemetry to the backend and is marked offline. Telemetry is published exclusively by edge devices — the ESP-32 Traffic Controller does not publish telemetry on their behalf, so an offline edge is simply reported offline until it reconnects.

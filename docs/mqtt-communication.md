@@ -7,7 +7,7 @@ MQTT provides the real-time communication channel between the backend, the ESP-3
 - Deliver timing schedules (turns loop + scheduling mode) and manual overrides to ESP-32 Traffic Controllers
 - Deliver per-device queue `enqueue` commands to ESP-32 Traffic Controllers (dynamic mode)
 - Receive lean AI traffic telemetry from Raspberry Pi Edge Devices (active signal phase + emergency-vehicle flag; no counts) and heartbeats
-- Receive fallback traffic light phase telemetry + queue-completion notices from ESP-32 Traffic Controllers
+- Receive queue-completion control notices from ESP-32 Traffic Controllers
 - Receive connection heartbeats and device health stats from all devices
 - Maintain persistent, low-latency connections over TLS
 
@@ -28,7 +28,7 @@ MQTT provides the real-time communication channel between the backend, the ESP-3
 traffic/
     device/                 # Raspberry Pi Edge Devices
         {deviceId}/
-            telemetry       # Publish vehicle count, lane density
+            telemetry       # Publish lean telemetry (signal + emergency flag)
             heartbeat       # Publish device status
             status          # LWT (Last Will & Testament) online/offline
             commands        # Subscribe to firmware updates/reboots
@@ -40,12 +40,12 @@ traffic/
             schedule        # Subscribe to schedule configs (turns loop + schedulingMode + dynamicConfig)
             schedule-request# Publish a request for the latest schedule on connect
             phase           # Controller publishes phase-sync frames (MQTT alt to LoRa); edge subscribes
-            telemetry       # Publish fallback phases + queue-done completion notices
+            queue-done      # Publish queue-completion notices (controller does not publish telemetry)
             heartbeat       # Publish controller heartbeat
             status          # LWT online/offline
 ```
 
-> No new topics are used for dynamic scheduling — existing telemetry/command topics are reused with extended payloads (see below).
+> Queue completion uses a dedicated `traffic/group/{groupId}/queue-done` topic; `enqueue` continues to reuse `traffic/group/{groupId}/commands` (see below).
 
 > Per-vehicle detections are **not** sent over MQTT — they go via `POST /api/devices/{id}/detections` (see Backend API). Telemetry is the lean signal + emergency snapshot only; the dynamic queue gate triggers off the REST endpoint.
 
@@ -62,7 +62,7 @@ traffic/
 
 ## Key Features
 
-**Edge Telemetry Communication** — Raspberry Pi Edge Devices publish lean status: `currentTrafficLightSignal` (or `RED` during fallback) plus `emergencyVehicleDetected` / `emergencyClass` / `emergencyConfidence` for visible emergency vehicles (`ambulance`, `fire truck`, `police car` by default). No counts, no density — per-vehicle history lives in `detections` via REST.
+**Edge Telemetry Communication (sole telemetry source)** — Raspberry Pi Edge Devices publish lean status: `currentTrafficLightSignal` (or `RED` during fallback) plus `emergencyVehicleDetected` / `emergencyClass` / `emergencyConfidence` for visible emergency vehicles (`ambulance`, `fire truck`, `police car` by default). No counts, no density — per-vehicle history lives in `detections` via REST.
 
 ```json
 {
@@ -72,20 +72,6 @@ traffic/
   "emergencyClass": "",
   "emergencyConfidence": 0.0,
   "timestamp": "2026-07-24T10:00:00Z"
-}
-```
-
-**Fallback Telemetry Communication** — The ESP-32 Traffic Controller publishes the current state of traffic lights in its group as a fallback when edge devices lose connectivity.
-
-```json
-{
-  "groupId": "group-01",
-  "activePhases": [
-    { "deviceId": "intersection-01", "phase": "GREEN" },
-    { "deviceId": "intersection-02", "phase": "RED" }
-  ],
-  "isFallback": true,
-  "timestamp": "2026-07-24T10:00:05Z"
 }
 ```
 
@@ -102,7 +88,7 @@ traffic/
 
 **Schedule Sync on Connect** — On connection, the ESP-32 publishes an empty message to `traffic/group/{groupId}/schedule-request`. The backend responds on `traffic/group/{groupId}/schedule` with the stored schedule, keeping the controller's cached copy (and offline NVS fallback) in sync without periodic polling.
 
-**Dynamic Queue Scheduling (reused topics, no new topics)** — Applies when the group's `schedulingMode` is `"dynamic"`:
+**Dynamic Queue Scheduling** — Applies when the group's `schedulingMode` is `"dynamic"`:
 
 - **Detection (Edge → Backend):** `POST /api/devices/{deviceId}/detections` — one multipart request per new ByteTrack ID (first sighting, any YOLO label) with the full annotated frame. New docs only (not `deduped:true`) with vehicle-allowlist + staleness guard run the queue gate.
 - **Enqueue (Backend → Controller):** Reuses `traffic/group/{groupId}/commands` with the standard envelope:
@@ -111,7 +97,7 @@ traffic/
 { "command": "enqueue", "payload": { "deviceId": "intersection-01" } }
 ```
 
-- **Queue completion (Controller → Backend):** Reuses `traffic/group/{groupId}/telemetry` with two extra fields:
+- **Queue completion (Controller → Backend):** Publishes to `traffic/group/{groupId}/queue-done`:
 
 ```json
 {

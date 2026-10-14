@@ -12,7 +12,7 @@ Its primary purpose is to ensure that coordinated traffic light signaling remain
 *   **Queue Execution (Dynamic Mode):** Maintains a FIFO queue from backend `enqueue` commands; serves each entry as GREEN → all-RED clearance (2-channel GREEN/RED relays); publishes queue-completion notices; idles at all-RED when the queue is empty.
 *   **LoRa Phase Broadcasting:** Computes the active traffic light state for all intersections in its group and broadcasts the target states to the Raspberry Pi actuators via LoRa (default) or the MQTT `traffic/group/{groupId}/phase` topic — see Phase Sync Transport below.
 *   **Offline Resilient Scheduling:** In the event of an internet outage, automatically transitions to offline mode, executing schedules locally using its battery-backed Real-Time Clock (RTC).
-*   **Fallback Status Telemetry:** When edge devices lose internet connection but the controller is online, the ESP-32 publishes the current active traffic light phases of the group to the backend so status remains visible.
+*   **No Traffic Telemetry:** The controller does not publish traffic telemetry — telemetry (active signal + emergency-vehicle flag) is published exclusively by the Raspberry Pi Edge Devices. The group topic carries only queue-completion notices.
 *   **Status & Heartbeat Reporting:** Publishes its own connection status and health parameters to the backend.
 
 ## Technology Stack
@@ -171,7 +171,7 @@ stateDiagram-v2
 1.  **Idle:** Broadcast all-RED to every device in the group (1-second heartbeat unchanged).
 2.  **Enqueue:** On `{"command": "enqueue", "payload": {"deviceId"}}` via `traffic/group/{groupId}/commands`, push `deviceId` to the in-RAM FIFO queue (backed to NVS) if it is not already queued and not currently GREEN. Duplicates are dropped.
 3.  **Serve (FIFO):** Pop the head → LoRa broadcast GREEN for that device + RED for all others for `greenSec` → all-RED clearance for `allRedSec` (burst 3 packets on each phase change, same `seq` semantics as the fixed loop).
-4.  **Complete:** Publish queue completion via `traffic/group/{groupId}/telemetry` with `queueDoneDeviceId` + `queueDepth` so the backend clears `has_queued_schedule` in RTDB. Serve the next head, or return to all-RED idle when empty.
+4.  **Complete:** Publish queue completion to `traffic/group/{groupId}/queue-done` with `queueDoneDeviceId` + `queueDepth` so the backend clears `has_queued_schedule` in RTDB. Serve the next head, or return to all-RED idle when empty.
 5.  **Detection:** one `POST /api/devices/{id}/detections` per new tracked vehicle (gated server-side by allowlist + staleness + RED + not-already-queued).
 6.  **Overrides win:** A manual `signal_override` / `cancel_override` preempts the queue per the envelope below; the queue resumes after override expiry/cancel.
 
@@ -188,9 +188,9 @@ sequenceDiagram
     B->>S: POST /detections(B, RED)
     S->>C: commands enqueue(B)
     C->>A: LoRa all-RED clearance
-    C->>S: telemetry queueDone(A)
+    C->>S: queue-done(A)
     C->>B: LoRa GREEN(B)
-    C->>S: telemetry queueDone(B)
+    C->>S: queue-done(B)
     C->>A: LoRa all-RED idle
 ```
 
@@ -200,8 +200,8 @@ Reference implementation decisions (see changelog 2.1.1):
 
 - **MQTT version:** The controller connects with **MQTT 3.1.1** over TLS (PubSubClient). The broker is v5-capable; no v5-only features are used.
 - **Group commands** (`traffic/group/{groupId}/commands`) use the envelope `{"command": "signal_override", "payload": {"phases": {...}, "durationSeconds": N}}` or `{"command": "cancel_override", "payload": {}}`. `durationSeconds <= 0` is indefinite. An active override pauses the turn-loop and uses the override phases in its place; on expiry/cancel it resumes the same turn it paused on but restarts that turn's full duration from the beginning — remaining time is not preserved.
-- **Queue commands (dynamic mode):** `{"command": "enqueue", "payload": {"deviceId": "..."}}` pushes one FIFO entry (dup-suppressed). After each serve the controller publishes `traffic/group/{groupId}/telemetry` with `queueDoneDeviceId` + `queueDepth` for the backend to clear `has_queued_schedule`.
-- **Fallback telemetry:** the controller publishes `traffic/group/{groupId}/telemetry` every **10 s** with `isFallback: true`, since it cannot observe edge-device connectivity directly. Heartbeat (`traffic/group/{groupId}/heartbeat`) is published every **30 s** (groupId, uptime, timestamp).
+- **Queue commands (dynamic mode):** `{"command": "enqueue", "payload": {"deviceId": "..."}}` pushes one FIFO entry (dup-suppressed). After each serve the controller publishes `traffic/group/{groupId}/queue-done` with `queueDoneDeviceId` + `queueDepth` for the backend to clear `has_queued_schedule`.
+- **No telemetry from the controller:** telemetry is published exclusively by edge devices (`traffic/device/{deviceId}/telemetry`). The controller's only group-topic data is queue completion on `traffic/group/{groupId}/queue-done`. Heartbeat (`traffic/group/{groupId}/heartbeat`) is published every **30 s** (groupId, uptime, timestamp).
 - **LoRa burst:** a phase change sends a **burst of 3 packets** retransmitting the *same logical packet* (identical `seq`); the regular heartbeat broadcast is 1 packet per second. Receivers reject duplicates/stale packets by `seq`. `seq` is persisted to NVS on each phase change so deduplication survives a controller reboot.
 - **Override flag (`ov`):** every phase frame sets `ov = override.active()` (`true` during manual or edge-initiated emergency overrides, `false` otherwise; defaults to `false`). The edge maps `ov: true` → 5 relay blinks, `ov: false` → 3 blinks before latching solid.
 - **Relay blink config (edge):** `relay_blink_normal=3`, `relay_blink_override=5`, `relay_blink_interval=0.5` (seconds per on/off step).

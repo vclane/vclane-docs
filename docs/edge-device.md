@@ -154,7 +154,7 @@ The edge device maintains a persistent MQTT connection to the backend when inter
 
 Responsibilities:
 
-- Publish lean AI traffic telemetry (emergency-vehicle flag + active signal only; no counts — history lives in `detections`)
+- Publish lean AI traffic telemetry — the sole telemetry source in the system (emergency-vehicle flag + active signal only; no counts — history lives in `detections`)
 - Report the currently actuated traffic light phase (from LoRa) or caution state
 - Send heartbeat updates (process uptime and timestamp)
 - Submit per-vehicle detections via `POST /api/devices/{id}/detections` (one multipart request per new ByteTrack ID: `trackId`, `class`, `deviceTimestamp`, required `image` full annotated frame; bounded queue, hold/retry offline).

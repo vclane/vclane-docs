@@ -4,6 +4,19 @@ This changelog tracks system-wide architectural modifications. Submodule develop
 
 ---
 
+## [2.9.0] — 2026-10-14
+
+### Edge-Only Telemetry
+
+Traffic telemetry is now published exclusively by the Raspberry Pi Edge Devices. The ESP-32 Traffic Controller no longer publishes fallback phase telemetry.
+
+#### Summary of Major Changes
+1.  **Edge-only telemetry:** `traffic/device/{deviceId}/telemetry` (active signal + emergency flag) is the system's sole telemetry source. The controller's periodic `isFallback: true` group telemetry is removed; an offline edge device is now reported offline rather than back-filled by the controller.
+2.  **Dedicated queue-completion topic:** queue completion moves from `traffic/group/{groupId}/telemetry` to `traffic/group/{groupId}/queue-done` (`queueDoneDeviceId`, `queueDepth` → clears `has_queued_schedule`). Controller `heartbeat` (30 s) and LWT `status` are unchanged.
+3.  **Docs-only change:** the controller firmware (`vclane-controller`) and the backend still publish/subscribe the old `traffic/group/{groupId}/telemetry` topic (and its fallback telemetry) until the corresponding code changes land. This entry documents the target architecture.
+
+---
+
 ## [2.8.0] — 2026-10-14
 
 ### Track-Only Edge (ByteTrack Default, Detect-Only Removed)

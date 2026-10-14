@@ -11,7 +11,7 @@ The system follows an **edge computing architecture**, where every traffic inter
 | 1   | [Overview](overview.md)                                 | System overview                                                                             |
 | 2   | [Architecture](architecture.md)                         | System architecture and component interaction                                               |
 | 3   | [Edge Device](edge-device.md)                           | Raspberry Pi edge device — video processing, AI, and traffic light actuation                |
-| 4   | [Traffic Controller](traffic-controller.md)             | ESP-32 Traffic Controller — local group scheduling, LoRa broadcasts, and fallback telemetry |
+| 4   | [Traffic Controller](traffic-controller.md)             | ESP-32 Traffic Controller — local group scheduling and LoRa broadcasts                       |
 | 5   | [Backend API](backend-api.md)                           | Backend — FastAPI, device management, traffic coordination                                  |
 | 6   | [MQTT Communication](mqtt-communication.md)             | MQTT layer — broker, security, topic structure, telemetry                                   |
 | 7   | [Media Server](media-server.md)                         | Video streaming — MediaMTX, RTSP, WebRTC                                                    |
