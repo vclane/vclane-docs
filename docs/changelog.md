@@ -4,6 +4,18 @@ This changelog tracks system-wide architectural modifications. Submodule develop
 
 ---
 
+## [2.10.0] — 2026-10-15
+
+### Edge: Backend Login at Device Startup
+
+The shared `BackendApiClient` now authenticates once when `vclane-edge run` starts instead of lazily on the first request.
+
+#### Summary of Major Changes
+1.  **Eager auth:** `BackendApiClient.ensure_login()` performs `POST /api/auth/login` at `VclaneEdgeDevice.run()` startup (before the video pipeline / uploader / override threads), so the first detection upload or emergency override does not pay the login round-trip.
+2.  **Non-fatal fallback:** a failed startup login is logged and the existing lazy auth path is retained — `request()` / `request_multipart()` still log in on first use and re-authenticate once on a 401. Devices without admin credentials (`api_url` / `admin_email` / `admin_password`) skip it silently.
+
+---
+
 ## [2.9.0] — 2026-10-14
 
 ### Edge-Only Telemetry

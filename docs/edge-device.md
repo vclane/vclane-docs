@@ -276,6 +276,8 @@ Example `config.json`:
 
 Auto-registration at `vclane-edge run` start occurs when `device_id` or `device_secret` are empty (or `force_register` is `true`). Registered credentials are used in-memory for the session — the config file is not modified.
 
+At `run` start the backend client authenticates once (`POST /api/auth/login`) before the video pipeline starts, so the first detection upload or emergency override does not pay the login round-trip. A failed startup login is logged and retried lazily on the first request (with a single re-auth on any 401).
+
 ## Technology Stack
 
 | Component                   | Technology                     |
