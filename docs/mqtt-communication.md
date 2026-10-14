@@ -145,9 +145,12 @@ When `sync_transport` is `mqtt` or `dual`, the controller publishes the same pha
   "seq": 10542,
   "ts": 1782806400,
   "p": { "intersection-01": "GREEN", "intersection-02": "RED" },
-  "ttl": 15
+  "ttl": 15,
+  "ov": false
 }
 ```
+
+`ov` is `true` while an override is active (`ov = override.active()`), `false` otherwise — the edge maps it to 5 vs 3 relay blinks. Missing `ov` defaults to `false` for backward compatibility.
 
 - Broker ACL: controller role may `publishClientSend traffic/group/%u/phase`; device role may `subscribePattern` / `publishClientReceive` / `unsubscribePattern traffic/group/+/phase`.
 - The backend ignores this topic (no subscription change needed).

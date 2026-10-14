@@ -4,7 +4,7 @@ This changelog tracks system-wide architectural modifications. Submodule develop
 
 ---
 
-## [Unreleased]
+## [2.5.0] — 2026-10-14
 
 ### Feature: Automatic Emergency-Vehicle Signal Override (edge-initiated)
 
@@ -14,6 +14,15 @@ Edge devices now request a signal override automatically when YOLO detects an em
 1.  **Telemetry:** new `emergencyVehicleDetected` (`bool`), `emergencyClass` (`string`), `emergencyConfidence` (`number`) fields on every edge telemetry payload (and RTDB `/telemetry/{deviceId}`). Set when an `emergency_classes` label is visible, cleared after `emergency_clear_s` without a sighting.
 2.  **Detection (edge-only):** `emergency_classes` (`ambulance`, `fire truck`, `police car` default) above `emergency_confidence` for `emergency_min_frames` consecutive sightings. One request per distinct vehicle (ByteTrack ID; one per presence episode in detect-only mode).
 3.  **Override request:** `POST /api/groups/{id}/commands` with `{"command": "signal_override", "payload": {"phases": {deviceId: "GREEN"}, "durationSeconds": 60}}`. Auth reuses `POST /api/auth/login` with `admin_email` / `admin_password` (env fallback `VCLANE_ADMIN_EMAIL` / `VCLANE_ADMIN_PASSWORD`). No `cancel_override` — the override expires naturally. Global `emergency_cooldown_s` (60 s default) suppresses redundant POSTs.
+
+### Feature: Relay Blink Before Transition (3x normal / 5x override)
+
+Edge relays blink the upcoming phase before latching solid: 3 blinks on normal schedule transitions, 5 on override-driven transitions.
+
+#### Summary of Major Changes
+1.  **Wire format:** LoRa/MQTT phase frame gains `ov: bool` (controller sets `ov = override.active()`). `ov: true` → 5 blinks, `ov: false` → 3. Defaults to `false` for backward compatibility.
+2.  **Edge actuation:** `apply_phase(phase, is_override)` ignores duplicate phases (1 s heartbeat re-broadcasts), otherwise blinks the new lamp on/off × N on a relay worker thread under the relay lock, then latches solid — so the 1 s signal/telemetry loop is not blocked. Entering caution aborts any in-progress blink and goes all-off with no blink; the first valid phase after boot goes straight solid.
+3.  **Config:** `relay_blink_normal=3`, `relay_blink_override=5`, `relay_blink_interval=0.5`.
 
 ---
 

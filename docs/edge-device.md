@@ -4,7 +4,7 @@ Each intersection contains an independent Raspberry Pi-based edge device acting 
 
 ## Phase Sync Transport (`sync_transport`)
 
-Phase frames (`{gid, seq, ts, p, ttl}`) can arrive via LoRa radio (default) or via the MQTT `traffic/group/{groupId}/phase` topic (QoS 1, retained) — both feed one shared `seq`-dedup state (first-valid wins).
+Phase frames (`{gid, seq, ts, p, ttl, ov}`) can arrive via LoRa radio (default) or via the MQTT `traffic/group/{groupId}/phase` topic (QoS 1, retained) — both feed one shared `seq`-dedup state (first-valid wins). `ov` is `true` while an override is active (5 relay blinks), `false` otherwise (3 blinks); missing `ov` defaults to `false`.
 
 | `sync_transport` | Behavior |
 | ---------------- | -------- |
@@ -174,8 +174,8 @@ Under the grouped architecture, the Raspberry Pi Edge Device functions as the ph
 
 Key behaviors:
 
-- **Phase Reception:** The Raspberry Pi listens for phase broadcasts via the configured `sync_transport` — LoRa packets and/or MQTT `traffic/group/{groupId}/phase` frames containing the target active phases.
-- **Relay Actuation:** It parses the received command (e.g., active phase, green/red light configurations) and controls the physical relays to update the signal lamps.
+- **Phase Reception:** The Raspberry Pi listens for phase broadcasts via the configured `sync_transport` — LoRa packets and/or MQTT `traffic/group/{groupId}/phase` frames containing the target active phases plus the `ov` override flag.
+- **Relay Actuation:** It parses the received command (e.g., active phase, green/red light configurations) and controls the physical relays to update the signal lamps. Via `apply_phase(phase, is_override)`: duplicate phases are ignored (the 1 s heartbeat re-broadcasts the same `seq`); otherwise the new lamp blinks on/off × N — 3 blinks when `ov` is `false`, 5 when `ov` is `true` — on a relay worker thread under the relay lock, then latches solid so the 1 s signal/telemetry loop is not blocked. Entering caution aborts any in-progress blink and goes all-off with no blink; the first valid phase after boot goes straight solid.
 - **Resilient Fallback:** If the phase signal is lost (LoRa out of range / ESP-32 failure, or MQTT broker unreachable in `mqtt` mode), the Raspberry Pi falls back to a pre-programmed local safety routine (such as all relays off for caution) to prevent unsafe signal states.
 
 ## Backend Communication
@@ -287,11 +287,16 @@ Example `config.json`:
   "counting_lines": [
     { "name": "northbound", "p1": [0.05, 0.5], "p2": [0.95, 0.5] }
   ],
-  "count_classes": ["car", "truck", "bus", "motorcycle", "bicycle"]
+  "count_classes": ["car", "truck", "bus", "motorcycle", "bicycle"],
+  "relay_blink_normal": 3,
+  "relay_blink_override": 5,
+  "relay_blink_interval": 0.5
 }
 ```
 
 Set `"tracker": null` (or pass `--no-tracker`) for detect-only mode. An empty-string `tracker` is normalized to `null`.
+
+`relay_blink_normal` / `relay_blink_override` select the blink count before latching solid (3 on schedule transitions, 5 when the phase frame has `ov: true`); `relay_blink_interval` is the seconds per on/off step.
 
 ### Video Pipeline Modes
 
