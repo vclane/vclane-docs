@@ -113,7 +113,7 @@ Backend flow:
 2. Validate all parts present and `image` non-empty — else `400`.
 3. Resolve `groupId` from `devices/{id}.groupId`.
 4. Compute doc ID `{deviceId}_{trackId}_{deviceTimestamp}`; if it exists, return `200` with `deduped: true` (no rewrite).
-5. Upload image to Storage (`detections/{deviceId}/{trackId}_{deviceTimestamp}.jpg`), write the `detections` doc with server `timestamp`, return doc ID.
+5. Upload image to Storage (`detections/{deviceId}/{trackId}_{deviceTimestamp}.jpg`), write the `detections` doc with server `timestamp`, return `201` with the doc ID.
 
 Detections bypass Mosquitto entirely and never touch RTDB.
 
