@@ -184,7 +184,7 @@ When YOLO reports an `emergency_classes` label (`ambulance`, `fire truck`, `poli
 
 Each edge device periodically reports its status to the backend over MQTT:
 
-- **Telemetry** (`traffic/device/{deviceId}/telemetry`): active signal (or `CAUTION` during fallback) + emergency-vehicle flag (`emergencyVehicleDetected` / `emergencyClass` / `emergencyConfidence`). No counts. Dynamic queue trigger moved to `POST /api/devices/{id}/detections`.
+- **Telemetry** (`traffic/device/{deviceId}/telemetry`): active signal (or `RED` during fallback) + emergency-vehicle flag (`emergencyVehicleDetected` / `emergencyClass` / `emergencyConfidence`). No counts. Dynamic queue trigger moved to `POST /api/devices/{id}/detections`.
 - **Heartbeat** (`traffic/device/{deviceId}/heartbeat`): process uptime and timestamp
 
 ## Software Architecture

@@ -62,7 +62,7 @@ traffic/
 
 ## Key Features
 
-**Edge Telemetry Communication** — Raspberry Pi Edge Devices publish lean status: `currentTrafficLightSignal` (or `CAUTION`) plus `emergencyVehicleDetected` / `emergencyClass` / `emergencyConfidence` for visible emergency vehicles (`ambulance`, `fire truck`, `police car` by default). No counts, no density — per-vehicle history lives in `detections` via REST.
+**Edge Telemetry Communication** — Raspberry Pi Edge Devices publish lean status: `currentTrafficLightSignal` (or `RED` during fallback) plus `emergencyVehicleDetected` / `emergencyClass` / `emergencyConfidence` for visible emergency vehicles (`ambulance`, `fire truck`, `police car` by default). No counts, no density — per-vehicle history lives in `detections` via REST.
 
 ```json
 {

@@ -103,8 +103,8 @@ Simplified relay hardware to a 2-channel module supporting only GREEN and RED si
 
 #### Summary of Major Changes
 1.  **Relay Hardware:** The edge device now supports a 2-channel relay board (GREEN and RED) instead of a 3-channel board. The yellow lamp relay has been removed.
-2.  **Phase Handling:** YELLOW, RED_YELLOW, FLASHING_YELLOW, and CAUTION phases are no longer actuated — they result in all relays being turned off (caution mode).
-3.  **Safety Fallback:** When no valid LoRa signal is received, the device enters caution mode with all relays off (instead of flashing yellow).
+2.  **Phase Handling:** YELLOW, RED_YELLOW, FLASHING_YELLOW, and CAUTION phases are no longer actuated — they result in solid RED (caution mode).
+3.  **Safety Fallback:** When no valid LoRa signal is received, the device enters caution mode with solid RED (instead of flashing yellow).
 4.  **Default GPIO Pins:** `relay_pins` defaults updated to `{"green": 17, "red": 22}` (GPIO 18 for yellow removed).
 
 ---
