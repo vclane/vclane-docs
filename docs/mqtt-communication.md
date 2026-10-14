@@ -104,7 +104,7 @@ traffic/
 
 **Dynamic Queue Scheduling (reused topics, no new topics)** — Applies when the group's `schedulingMode` is `"dynamic"`:
 
-- **Detection (Edge → Backend):** `POST /api/devices/{deviceId}/detections` — one multipart request per new ByteTrack ID (first sighting, any YOLO label) with JPEG crop. New docs only (not `deduped:true`) with vehicle-allowlist + staleness guard run the queue gate.
+- **Detection (Edge → Backend):** `POST /api/devices/{deviceId}/detections` — one multipart request per new ByteTrack ID (first sighting, any YOLO label) with the full annotated frame. New docs only (not `deduped:true`) with vehicle-allowlist + staleness guard run the queue gate.
 - **Enqueue (Backend → Controller):** Reuses `traffic/group/{groupId}/commands` with the standard envelope:
 
 ```json

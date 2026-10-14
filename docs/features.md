@@ -4,7 +4,7 @@
 
 - Real-time object detection (YOLO)
 - Multi-object tracking with persistent IDs (ByteTrack, opt-in)
-- Per-vehicle detection events with image crops (via REST)
+- Per-vehicle detection events with full annotated frames (via REST)
 - Automated traffic analysis
 - Congestion detection
 - Traffic pattern monitoring

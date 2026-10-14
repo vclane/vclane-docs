@@ -73,7 +73,7 @@ One document per detected vehicle, written by the backend when the edge posts to
 | `deviceTimestamp` | `string \| int` | Edge crossing time passthrough (part of dedup key)   |
 | `trackId`         | `int \| string` | ByteTrack ID (part of dedup key)                     |
 | `class`           | `string`    | YOLO label, unfiltered (any class)                       |
-| `imageUrl`        | `string`    | Firebase Storage download URL of the vehicle crop — **required** |
+| `imageUrl`        | `string`    | Firebase Storage download URL of the detection frame — **required** |
 
 > **Note:** `imageUrl` is required — events without an image are rejected. Mobile queries this collection directly (no REST read path). Required composite indexes: `(deviceId, timestamp DESC)`, `(groupId, timestamp DESC)`. Security rules: signed-in operators may read; writes are backend-only (`write: false`, Admin SDK bypasses rules).
 

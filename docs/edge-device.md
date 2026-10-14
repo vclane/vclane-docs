@@ -77,7 +77,7 @@ Responsibilities:
 - Capture live camera feeds
 - Process frames using OpenCV
 - Run YOLO + ByteTrack tracking with persistent IDs
-- Emit one per-vehicle detection event per new tracked ID (first sighting, any YOLO label) with JPEG crop
+- Emit one per-vehicle detection event per new tracked ID (first sighting, any YOLO label) with the full annotated frame
 - Generate traffic statistics (signal + emergency flag only; no aggregate counts)
 - Publish live annotated video streams (boxes + track IDs)
 
@@ -87,7 +87,7 @@ Data flow:
 graph TD
     Camera --> OpenCV
     OpenCV --> TRACK["YOLO + ByteTrack (track, persist=True)"]
-    TRACK --> Detect["DetectionTracker (first-seen per ID + crop)"]
+    TRACK --> Detect["DetectionTracker (first-seen per ID + annotated frame)"]
     Detect --> Upload["DetectionUploader (POST /detections, retry)"]
     TRACK --> RTSP["RTSP Stream (annotated)"]
 ```
@@ -107,7 +107,7 @@ Advantages:
 
 Examples:
 
-- Vehicle detection events (one per new tracked ID, with JPEG crop)
+- Vehicle detection events (one per new tracked ID, with the full annotated frame)
 - Lane occupancy detection
 - Queue length estimation
 - Traffic congestion detection
@@ -134,7 +134,7 @@ CLI flags:
 
 `src/vclane_edge/detection.py` layers eventing on top of ByteTrack IDs (no aggregate counts):
 
-- **Trigger** — first sighting of each ByteTrack ID emits one `DetectionEvent` (any YOLO label, unfiltered) with a padded JPEG crop. Seen IDs are remembered until a stream gap resets them.
+- **Trigger** — first sighting of each ByteTrack ID emits one `DetectionEvent` (any YOLO label, unfiltered) with the full annotated frame. Seen IDs are remembered until a stream gap resets them.
 - **Upload** — `DetectionUploader` POSTs each event immediately via `POST /api/devices/{id}/detections` (bounded queue, drop-oldest on overflow, retry offline with backoff).
 - **Emergency** — the same tracker debounces `emergency_classes` over `emergency_min_frames` consecutive sightings per vehicle for override requests.
 
@@ -157,7 +157,7 @@ Responsibilities:
 - Publish lean AI traffic telemetry (emergency-vehicle flag + active signal only; no counts — history lives in `detections`)
 - Report the currently actuated traffic light phase (from LoRa) or caution state
 - Send heartbeat updates (process uptime and timestamp)
-- Submit per-vehicle detections via `POST /api/devices/{id}/detections` (one multipart request per new ByteTrack ID: `trackId`, `class`, `deviceTimestamp`, required `image` crop; bounded queue, hold/retry offline).
+- Submit per-vehicle detections via `POST /api/devices/{id}/detections` (one multipart request per new ByteTrack ID: `trackId`, `class`, `deviceTimestamp`, required `image` full annotated frame; bounded queue, hold/retry offline).
 
 > Dynamic queue gate triggers off `POST /api/devices/{id}/detections` (new-doc only), not telemetry. Dedup is server-side via doc-ID existence + RTDB `has_queued_schedule` — the edge keeps uploading normally and never tracks queue state itself.
 
@@ -297,7 +297,7 @@ Auto-registration at `vclane-edge run` start occurs when `device_id` or `device_
 
 ## Key Features
 
-**AI-Based Traffic Analysis** — Vehicle detection, ByteTrack multi-object tracking with persistent IDs, per-vehicle detection events with image crops, pedestrian detection, lane occupancy detection, queue length estimation, congestion detection.
+**AI-Based Traffic Analysis** — Vehicle detection, ByteTrack multi-object tracking with persistent IDs, per-vehicle detection events with full annotated frames, pedestrian detection, lane occupancy detection, queue length estimation, congestion detection.
 
 **Local Edge Processing** — Performs AI inference locally, reduces bandwidth consumption, provides faster response time, minimizes cloud processing requirements.
 

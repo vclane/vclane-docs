@@ -105,7 +105,7 @@ Content-Type: multipart/form-data
 | `trackId` | `int \| string` | Yes | ByteTrack ID (part of dedup key) |
 | `class` | `string` | Yes | YOLO label, unfiltered |
 | `deviceTimestamp` | `string \| int` | Yes | Edge crossing time (part of dedup key) |
-| `image` | `file (JPEG)` | Yes | Vehicle crop — rejected if missing |
+| `image` | `file (JPEG)` | Yes | Full annotated frame — rejected if missing |
 
 Backend flow:
 
