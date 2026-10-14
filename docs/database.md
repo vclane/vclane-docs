@@ -89,14 +89,14 @@ This path is updated on every heartbeat and telemetry message from the edge devi
 
 | Field                  | Type            | Source              | Description                                                                                       |
 | ---------------------- | --------------- | ------------------- | ------------------------------------------------------------------------------------------------- |
-| _(device fields)_      | _various_       | Device payload      | Device-specific data (vehicleCount, vehicleTotal, directionCounts, classCounts, trafficDensity, emergencyVehicleDetected, emergencyClass, emergencyConfidence, etc.) |
+| _(device fields)_      | _various_       | Device payload      | Device-specific data (currentTrafficLightSignal, emergencyVehicleDetected, emergencyClass, emergencyConfidence, etc. — no counts) |
 | `timestamp`            | `string \| int` | Device payload      | Device-local timestamp                                                                            |
 | `online`               | `bool`          | Injected by backend | `True` — set on every heartbeat or telemetry, `False` — set by goodbye message or timeout checker |
 | `lastSeen`             | `int`           | Injected by backend | Server Unix timestamp of the most recent heartbeat or telemetry                                   |
 | `has_queued_schedule`  | `bool`          | Backend queue gate  | `True` — device has a pending/ongoing queued GREEN in dynamic mode; `False` — default/idle        |
 | `queuedAt`             | `int \| null`   | Backend queue gate  | Server Unix timestamp of the last `enqueue`, cleared (`null`) on `queue-done`                     |
 
-> **Note:** `has_queued_schedule` / `queuedAt` are only used when the device's group has `schedulingMode: "dynamic"`. They are written **only by the backend** (set on `enqueue`, cleared on controller `queue-done`); edge devices never write them. They provide dedup: while `has_queued_schedule` is `true`, further `vehicleCount >= 1` telemetry for that device does not trigger another enqueue.
+> **Note:** `has_queued_schedule` / `queuedAt` are only used when the device's group has `schedulingMode: "dynamic"`. They are written **only by the backend** (set on `enqueue`, cleared on controller `queue-done`); edge devices never write them. They provide dedup: while `has_queued_schedule` is `true`, further detections for that device do not trigger another enqueue.
 
 > **Note:** `vehicleToday` has been **removed** from `/telemetry/{deviceId}` and must not be written. "Vehicles detected today" is derived by counting `detections` documents with `timestamp >= startOfDay` — see `detections/{detectionId}` above.
 
@@ -105,11 +105,6 @@ Example document (tracking enabled, dynamically queued):
 ```json
 {
   "deviceId": "intersection-01",
-  "vehicleCount": 12,
-  "vehicleTotal": 148,
-  "directionCounts": { "northbound": 148 },
-  "classCounts": { "car": 9, "truck": 2, "bus": 1 },
-  "trafficDensity": "MODERATE",
   "currentTrafficLightSignal": "RED",
   "emergencyVehicleDetected": false,
   "emergencyClass": "",

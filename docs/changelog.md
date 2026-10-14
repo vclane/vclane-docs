@@ -4,6 +4,19 @@ This changelog tracks system-wide architectural modifications. Submodule develop
 
 ---
 
+## [2.7.0] — 2026-10-14
+
+### No-Count Edge + Queue Trigger on Detections
+
+Edge stops all aggregate counting; per-vehicle history lives in `detections` and the dynamic queue gate triggers off the REST endpoint.
+
+#### Summary of Major Changes
+1.  **Lean telemetry:** edge MQTT telemetry is signal + emergency only (`currentTrafficLightSignal`, `emergencyVehicleDetected/Class/Confidence`, `timestamp`). `vehicleCount/Total`, `directionCounts`, `classCounts`, `trafficDensity` removed; today-counts come from `detections` queries.
+2.  **Unified detection module (edge):** `detection.py` (`DetectionTracker` + `DetectionUploader`) replaces counting + emergency trackers. One event per new ByteTrack ID (first sighting, any YOLO label) with JPEG crop → `POST /api/devices/{id}/detections` (bounded queue, retry offline). Detect-only sends none.
+3.  **Queue gate moves to REST:** `POST /api/devices/{id}/detections` (new-doc only) runs the dynamic gate (vehicle allowlist, staleness guard, RED + `has_queued_schedule` dedup). Telemetry no longer triggers enqueue.
+
+---
+
 ## [2.6.0] — 2026-10-14
 
 ### Feature: Per-Vehicle Detections in Firestore (via REST)

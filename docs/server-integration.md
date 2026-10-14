@@ -127,7 +127,7 @@ On connect, the backend subscribes to six wildcard topics plus the Dynamic Secur
 
 | Topic Pattern                       | Handler                   | Destination                                                                                                |
 | ----------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `traffic/device/+/telemetry`        | `_handle_telemetry`       | Writes to RTDB at `/telemetry/{deviceId}` — injects `online: true` and `lastSeen`; runs dynamic queue gate |
+| `traffic/device/+/telemetry`        | `_handle_telemetry`       | Writes to RTDB at `/telemetry/{deviceId}` — injects `online: true` and `lastSeen` (no queue gate)          |
 | `traffic/device/+/heartbeat`        | `_handle_heartbeat`       | Same as telemetry (no queue gate)                                                                          |
 | `traffic/device/+/goodbye`          | `_handle_goodbye`         | Sets `online: false` on `/telemetry/{deviceId}`                                                            |
 | `traffic/device/+/acknowledgements` | `_handle_ack`             | Logs the payload — no persistence or callback                                                              |
@@ -241,14 +241,15 @@ Edge devices in the group respond on `traffic/group/{groupId}/prepare-response`.
 
 ### Dynamic Queue Gate (per-group `schedulingMode: "dynamic"`)
 
-No new topics — the gate piggybacks on existing telemetry. Threshold is 1 live vehicle; queue order is FIFO.
+No new topics — the gate triggers off `POST /api/devices/{id}/detections` (new docs only). Telemetry no longer triggers enqueue.
 
-**On `traffic/device/{deviceId}/telemetry`:**
+**On `POST /api/devices/{deviceId}/detections` (new doc, not `deduped:true`):**
 
 ```
-group = Firestore lookup via devices/{deviceId}.groupId
-if group.schedulingMode != "dynamic": return  # fixed path: persist only
-if payload.vehicleCount < 1: return           # no vehicle → no-op
+group = Firestore lookup via devices/{deviceId}.groupId (already resolved)
+if group.schedulingMode != "dynamic": return  # fixed path: store only
+if payload.class not in vehicle allowlist: return  # detections are unfiltered; pedestrians must not queue
+if now - deviceTimestamp > ~30s: return           # stale (offline retry burst) → store only, no queue
 state = RTDB /telemetry/{deviceId}            # {currentTrafficLightSignal, has_queued_schedule}
 if state.currentTrafficLightSignal != "RED": drop   # already GREEN → already served
 if state.has_queued_schedule == true: drop          # dedup pending/ongoing request
@@ -271,7 +272,7 @@ When the controller's FIFO empties it broadcasts all-RED; no backend action is n
 
 | Direction            | Topic                                  | Publisher         | Consumer                      | Payload                                                                               |
 | -------------------- | -------------------------------------- | ----------------- | ----------------------------- | ------------------------------------------------------------------------------------- |
-| Device → Backend     | `traffic/device/{id}/telemetry`        | Edge device       | Backend (→RTDB + queue gate)  | Telemetry JSON; live `vehicleCount >= 1` = detection in dynamic mode                  |
+| Device → Backend     | `traffic/device/{id}/telemetry`        | Edge device       | Backend (→RTDB)               | Lean telemetry JSON (signal + emergency flag; no counts, no queue trigger) |
 | Device → Backend     | `traffic/device/{id}/heartbeat`        | Edge device       | Backend (→RTDB)               | Arbitrary JSON                                                                        |
 | Device → Backend     | `traffic/device/{id}/acknowledgements` | Edge device       | Backend (logged)              | Arbitrary JSON                                                                        |
 | Device → Backend     | `traffic/group/{id}/prepare-response`  | Edge device       | Backend (unhandled)           | Arbitrary JSON                                                                        |

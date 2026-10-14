@@ -60,7 +60,7 @@ graph TB
 
 **Traffic Monitoring** — Receive real-time telemetry, monitor traffic conditions, store traffic information, generate traffic statistics, detect traffic events.
 
-**Traffic Control** — Send traffic signal commands, trigger manual overrides, manage intersection schedules (turns loop + per-group `schedulingMode: fixed | dynamic`), coordinate multiple intersections, process command responses. In `dynamic` mode the backend runs a queue gate on edge telemetry (live `vehicleCount >= 1` → `enqueue` when RED + not already queued) and clears RTDB `has_queued_schedule` on controller queue-completion.
+**Traffic Control** — Send traffic signal commands, trigger manual overrides, manage intersection schedules (turns loop + per-group `schedulingMode: fixed | dynamic`), coordinate multiple intersections, process command responses. In `dynamic` mode the backend runs a queue gate on new `POST /api/devices/{id}/detections` docs (vehicle allowlist + staleness guard → `enqueue` when RED + not already queued) and clears RTDB `has_queued_schedule` on controller queue-completion.
 
 **Real-Time Synchronization** — MQTT command publishing, device heartbeat processing, WebSocket client updates, event notifications.
 
@@ -93,7 +93,7 @@ See [Server Integration](server-integration.md) for details on authentication fl
 
 ## Detections via REST
 
-Per-vehicle detections are sent over HTTP REST, **not** MQTT. The edge posts one request per ByteTrack line-crossing event:
+Per-vehicle detections are sent over HTTP REST, **not** MQTT. The edge posts one request per new ByteTrack ID (first sighting):
 
 ```
 POST /api/devices/{id}/detections
@@ -116,6 +116,8 @@ Backend flow:
 5. Upload image to Storage (`detections/{deviceId}/{trackId}_{deviceTimestamp}.jpg`), write the `detections` doc with server `timestamp`, return `201` with the doc ID.
 
 Detections bypass Mosquitto entirely and never touch RTDB.
+
+> Dynamic queue gate (per-group `schedulingMode: "dynamic"`) triggers here on new docs only (not `deduped:true`): vehicle allowlist + staleness guard (`deviceTimestamp` older than ~30 s still stores but skips queue) + device RED + `has_queued_schedule == false` → `enqueue` to `traffic/group/{gid}/commands`. See Server Integration.
 
 ## Schedule Synchronization
 

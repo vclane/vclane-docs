@@ -172,7 +172,7 @@ stateDiagram-v2
 2.  **Enqueue:** On `{"command": "enqueue", "payload": {"deviceId"}}` via `traffic/group/{groupId}/commands`, push `deviceId` to the in-RAM FIFO queue (backed to NVS) if it is not already queued and not currently GREEN. Duplicates are dropped.
 3.  **Serve (FIFO):** Pop the head → LoRa broadcast GREEN for that device + RED for all others for `greenSec` → all-RED clearance for `allRedSec` (burst 3 packets on each phase change, same `seq` semantics as the fixed loop).
 4.  **Complete:** Publish queue completion via `traffic/group/{groupId}/telemetry` with `queueDoneDeviceId` + `queueDepth` so the backend clears `has_queued_schedule` in RTDB. Serve the next head, or return to all-RED idle when empty.
-5.  **Detection threshold:** 1 vehicle — any edge telemetry with live `vehicleCount >= 1` is a detection event (gated server-side by RED + not-already-queued).
+5.  **Detection:** one `POST /api/devices/{id}/detections` per new tracked vehicle (gated server-side by allowlist + staleness + RED + not-already-queued).
 6.  **Overrides win:** A manual `signal_override` / `cancel_override` preempts the queue per the envelope below; the queue resumes after override expiry/cancel.
 
 ```mermaid
@@ -181,11 +181,11 @@ sequenceDiagram
     participant S as Backend
     participant C as Controller
     participant B as Edge B
-    A->>S: telemetry(A, vehicleCount=1, RED)
+    A->>S: POST /detections(A, RED)
     S->>S: RED + has_queued=false? → enqueue
     S->>C: commands enqueue(A)
     C->>A: LoRa GREEN(A) / RED(B)
-    B->>S: telemetry(B, vehicleCount=1, RED)
+    B->>S: POST /detections(B, RED)
     S->>C: commands enqueue(B)
     C->>A: LoRa all-RED clearance
     C->>S: telemetry queueDone(A)

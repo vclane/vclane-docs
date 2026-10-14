@@ -4,8 +4,7 @@
 
 - Real-time object detection (YOLO)
 - Multi-object tracking with persistent IDs (ByteTrack, opt-in)
-- Vehicle counting: live occupancy + cumulative line crossings
-- Per-direction and per-class traffic breakdowns
+- Per-vehicle detection events with image crops (via REST)
 - Automated traffic analysis
 - Congestion detection
 - Traffic pattern monitoring
@@ -19,8 +18,8 @@
 
 ## Real-Time Monitoring
 
-- Live camera streaming (annotated with boxes, track IDs, counting lines)
-- Device telemetry (live/total counts, density, signal state)
+- Live camera streaming (annotated with boxes + track IDs)
+- Device telemetry (signal state, emergency flag) + per-vehicle detections history
 - Traffic analytics
 - Intersection status
 

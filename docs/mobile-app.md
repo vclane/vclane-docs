@@ -137,7 +137,7 @@ No `autoDispose` is used — all providers are global singletons for the app lif
 | `User`           | id, email, displayName, role ('operator')                                     |
 | `Device`         | id, name, location, status (online/offline/warning), firmwareVersion, rtspUrl |
 | `Group`          | id, name, description, location                                               |
-| `Telemetry`      | vehicleCount, vehicleTotal, directionCounts, classCounts, trafficDensity, currentTrafficLightSignal, emergencyVehicleDetected, emergencyClass, emergencyConfidence, timestamp |
+| `Telemetry`      | currentTrafficLightSignal, emergencyVehicleDetected, emergencyClass, emergencyConfidence, timestamp (no counts — history via `Detection`) |
 | `SignalOverride` | deviceId, targetSignal, requestedAt                                           |
 | `Detection`      | deviceId, groupId, timestamp (server), deviceTimestamp, trackId, class (any YOLO label), imageUrl (required) |
 
