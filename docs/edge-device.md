@@ -262,17 +262,20 @@ Example `config.json`:
 
 | Mode                      | Description                                                            |
 | ------------------------- | ---------------------------------------------------------------------- |
-| `opencv+ffmpeg` (default) | OpenCV capture → YOLO track → FFmpeg stdin → RTSP                     |
-| `direct-ffmpeg`           | Source → FFmpeg → RTSP (no OpenCV/YOLO, pure passthrough)              |
-| `opencv+gstreamer`        | OpenCV capture → YOLO → GStreamer → RTSP (falls back to opencv+ffmpeg) |
+| `opencv+ffmpeg` (default) | OpenCV capture → YOLO track + annotate → FFmpeg stdin → WHIP (LiveKit) |
+| `direct-ffmpeg`           | Source → FFmpeg → WHIP (no OpenCV/YOLO, pure passthrough)              |
+| `opencv+gstreamer`        | OpenCV capture → YOLO track + annotate → GStreamer → WHIP (falls back to opencv+ffmpeg) |
+
+Annotation (boxes + track IDs) is burned in on the Pi before encode, so LiveKit carries annotated frames opaquely. Target encode: H.264 baseline, 720p, ~1–1.5 Mbps, 2 s GOP (transcode-free). The Pi idles with no publish by default and starts FFmpeg/WHIP on MQTT `start_publish`, stops on `stop_publish` (on-demand publishing to stay in free tier).
 
 ### Registration Flow
 
 1. Admin runs `vclane-edge register --api-url <url>`
 2. Prompts for Firebase email/password (or sets `VCLANE_ADMIN_EMAIL` / `VCLANE_ADMIN_PASSWORD`)
 3. `POST /api/auth/login` → JWT
-4. `POST /api/devices` → receives `{deviceId, deviceSecret, rtspUrl}`
+4. `POST /api/devices` → receives `{deviceId, deviceSecret, rtspUrl, livekitRoom}` (room `= deviceId`; `rtspUrl` deprecated since 2.11.0 but kept for backward compat)
 5. With `--out <path>`, credentials saved as JSON; otherwise printed to stdout
+6. On `run`, Pi fetches a publisher LiveKit token (or uses provisioned token) and publishes annotated WHIP to `room=deviceId` only after MQTT `start_publish`
 
 Auto-registration at `vclane-edge run` start occurs when `device_id` or `device_secret` are empty (or `force_register` is `true`). Registered credentials are used in-memory for the session — the config file is not modified.
 
@@ -294,7 +297,7 @@ At `run` start the backend client authenticates once (`POST /api/auth/login`) be
 | Actuator Interface          | GPIO-controlled Relay Board    |
 | MQTT Communication          | Eclipse Paho MQTT Client       |
 | Communication Protocol      | MQTT over TLS (to Backend)     |
-| Video Streaming             | RTSP Publisher                 |
+| Video Streaming             | WHIP Publisher (FFmpeg → LiveKit)  |
 | Containerization (Optional) | Docker                         |
 
 ## Key Features

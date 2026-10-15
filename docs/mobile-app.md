@@ -73,7 +73,7 @@ lib/
 | Real-Time Telemetry | Firebase Realtime Database |
 | File Storage        | Firebase Storage           |
 | HTTP Client         | Dio                        |
-| Video Playback      | media_kit (RTSP/WebRTC)    |
+| Video Playback      | livekit_client (WebRTC)    |
 | Charts              | fl_chart                   |
 | Image Picker        | image_picker               |
 | Fonts               | google_fonts (Inter)       |
@@ -85,7 +85,7 @@ lib/
 | LoginScreen        | `/login`              | Email/password sign-in with VCLane branding                  |
 | DashboardScreen    | `/dashboard`          | Device list grouped by status, quick stats, group breakdown  |
 | DeviceDetailScreen | `/devices/:id`        | Full device info, telemetry, stream preview, signal override |
-| LiveStreamScreen   | `/devices/:id/stream` | Full-screen RTSP video playback                              |
+| LiveStreamScreen   | `/devices/:id/stream` | Full-screen LiveKit WebRTC playback                              |
 | ProfileScreen      | `/profile`            | User profile, preferences, app info, sign out                |
 | EditProfileScreen  | `/profile/edit`       | Edit display name, photo, address, phone                     |
 
@@ -102,7 +102,7 @@ Dio HTTP (backend API) ──► ApiDataSource ──► Repository ──► Fu
 ```
 
 - **Real-time data** (devices, groups, users, telemetry) flows through `StreamProvider` from Firestore/RTDB → widgets update automatically
-- **One-shot requests** (stream URLs) use `FutureProvider.family` via the Dio-based API client
+- **One-shot requests** (LiveKit join tokens) use `FutureProvider.family` via the Dio-based API client
 - **Derived state** (grouped device lists, effective readings with overrides) uses plain `Provider<T>`
 
 ## Routing & Auth Guard
@@ -135,7 +135,7 @@ No `autoDispose` is used — all providers are global singletons for the app lif
 | Entity           | Key Fields                                                                    |
 | ---------------- | ----------------------------------------------------------------------------- |
 | `User`           | id, email, displayName, role ('operator')                                     |
-| `Device`         | id, name, location, status (online/offline/warning), firmwareVersion, rtspUrl |
+| `Device`         | id, name, location, status (online/offline/warning), firmwareVersion, livekitRoom, rtspUrl (deprecated, kept for backward compat) |
 | `Group`          | id, name, description, location                                               |
 | `Telemetry`      | currentTrafficLightSignal, emergencyVehicleDetected, emergencyClass, emergencyConfidence, timestamp (no counts — history via `Detection`) |
 | `SignalOverride` | deviceId, targetSignal, requestedAt                                           |
@@ -157,7 +157,7 @@ No `autoDispose` is used — all providers are global singletons for the app lif
 ## Implementation Notes
 
 - **Signal overrides** use an in-memory mock map. TODO: replace with backend API call when the endpoint is available.
-- **Video playback** with `media_kit` is stubbed. The `VideoPlayerWidget` shows a placeholder with the RTSP URL and a no-op connect button. Full integration is pending.
+- **Video playback** with `livekit_client`: `VideoTrackRenderer` joins `room=deviceId` via `POST /api/devices/{id}/livekit-token` (Dio) and renders annotated WebRTC. Leaving the screen triggers `stop_publish` (via webhook) to save minutes. Stubbed `media_kit` RTSP `VideoPlayerWidget` is deprecated since 2.11.0 but kept for backward compat.
 - **Use cases** exist in the domain layer (`LoginUseCase`, `GetDevicesUseCase`, etc.) but are not wired into providers — providers call repositories directly. This is a transitional pattern.
 - **Charts** (`fl_chart`) is a dependency but no chart widgets have been implemented yet.
 - **Firebase Cloud Messaging** is not yet wired in.

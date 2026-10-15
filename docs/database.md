@@ -16,7 +16,8 @@ Firestore stores long-lived documents in collections. It is used for device meta
 | `location`         | `string`         | Intersection location description                   |
 | `status`           | `string`         | Static seed-time status (`"online"` or `"offline"`) |
 | `firmwareVersion`  | `string`         | Edge device firmware version                        |
-| `rtspUrl`          | `string`         | RTSP stream URL for video                           |
+| `livekitRoom`      | `string`         | LiveKit room name (= `deviceId`) for WHIP/WebRTC        |
+| `rtspUrl`          | `string`         | RTSP stream URL for video (deprecated since 2.11.0, kept for backward compat) |
 | `deviceSecretHash` | `string`         | bcrypt hash of the device secret                    |
 | `groupId`          | `string \| null` | Assigned group, if any                              |
 | `createdAt`        | `Timestamp`      | Document creation time                              |

@@ -14,7 +14,7 @@ The system follows an **edge computing architecture**, where every traffic inter
 | 4   | [Traffic Controller](traffic-controller.md)             | ESP-32 Traffic Controller — local group scheduling and LoRa broadcasts                       |
 | 5   | [Backend API](backend-api.md)                           | Backend — FastAPI, device management, traffic coordination                                  |
 | 6   | [MQTT Communication](mqtt-communication.md)             | MQTT layer — broker, security, topic structure, telemetry                                   |
-| 7   | [Media Server](media-server.md)                         | Video streaming — MediaMTX, RTSP, WebRTC                                                    |
+| 7   | [Media Server](media-server.md)                         | Video streaming — LiveKit Cloud, WHIP, WebRTC (annotated, on-demand)                |
 | 8   | [Mobile App](mobile-app.md)                             | Flutter application — auth, dashboard, video playback, device control                       |
 | 9   | [Features](features.md)                                 | System-wide key features                                                                    |
 | 10  | [Architectural Advantages](architectural-advantages.md) | Low latency, scalability, resilience, security                                              |

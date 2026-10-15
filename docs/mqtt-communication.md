@@ -8,6 +8,7 @@ MQTT provides the real-time communication channel between the backend, the ESP-3
 - Deliver per-device queue `enqueue` commands to ESP-32 Traffic Controllers (dynamic mode)
 - Receive lean AI traffic telemetry from Raspberry Pi Edge Devices (active signal phase + emergency-vehicle flag; no counts) and heartbeats
 - Receive queue-completion control notices from ESP-32 Traffic Controllers
+- Deliver publish-control `start_publish` / `stop_publish` to Raspberry Pi Edge Devices (LiveKit on-demand streaming, from `POST /api/livekit/webhook`)
 - Receive connection heartbeats and device health stats from all devices
 - Maintain persistent, low-latency connections over TLS
 
@@ -85,6 +86,15 @@ traffic/
 ```
 
 `durationSeconds <= 0` is indefinite. While an override is active the controller pauses the schedule turn-loop and uses the override phases in its place; when the override ends (expiry or cancel) it resumes the same turn it paused on but restarts that turn's full duration from the beginning — remaining time is not preserved.
+
+**Device Publish Control** — Commands on `traffic/device/{id}/commands` use the same `{command, payload}` envelope:
+
+```json
+{ "command": "start_publish", "payload": {} }
+{ "command": "stop_publish", "payload": {} }
+```
+
+`start_publish` / `stop_publish` start/stop the Pi FFmpeg/WHIP publish to LiveKit `room=deviceId` for on-demand viewing.
 
 **Schedule Sync on Connect** — On connection, the ESP-32 publishes an empty message to `traffic/group/{groupId}/schedule-request`. The backend responds on `traffic/group/{groupId}/schedule` with the stored schedule, keeping the controller's cached copy (and offline NVS fallback) in sync without periodic polling.
 
