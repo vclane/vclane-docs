@@ -8,17 +8,19 @@ The backend acts as the centralized management and coordination layer between us
 graph TB
     subgraph Server["VCLane Server (Docker Compose)"]
         Caddy["Reverse Proxy — Caddy<br/>(TLS termination)"]
-        Backend["Backend API — FastAPI<br/>(Auth / Commands / Telemetry / LiveKit tokens)"]
+        Backend["Backend API — FastAPI<br/>(Auth / Commands / Telemetry)"]
+        Media["Media Server — MediaMTX<br/>(RTSP / WebRTC relay)"]
         MQTT["MQTT Broker — Mosquitto<br/>(TLS + password auth)"]
 
         Caddy -->|"/api/* /ws/* /health"| Backend
-        Backend -->|"join tokens + webhooks"| LiveKit["LiveKit Cloud<br/>(WHIP in / WebRTC out)"]
+        Caddy -->|"/stream/*"| Media
+        Backend -->|"Auth query"| Media
     end
 
     Backend -->|"Auth / DB"| Firebase["Firebase Services<br/>(Auth / Firestore / RTDB)"]
-    MQTT -->|"Commands / Sync / Publish control"| Edge["Raspberry Pi Edge Devices"]
+    MQTT -->|"Commands / Sync"| Edge["Raspberry Pi Edge Devices"]
     Edge -->|"Telemetry / Heartbeat / Ack"| MQTT
-    Edge -->|"WHIP Stream (annotated, on demand)"| LiveKit
+    Edge -->|"RTSP Stream"| Media
 ```
 
 ## Responsibilities
@@ -46,7 +48,7 @@ graph TB
 | Authentication       | Firebase Admin SDK + JWT + bcrypt   |
 | Database             | Firestore                           |
 | Real-Time Telemetry  | Realtime Database                   |
-| Media Server         | LiveKit Cloud (WHIP / WebRTC)            |
+| Media Server         | MediaMTX (RTSP / WebRTC)            |
 | Reverse Proxy        | Caddy                               |
 | API Documentation    | OpenAPI / Swagger                   |
 | Containerization     | Docker + Docker Compose             |
@@ -85,9 +87,7 @@ graph TB
 | `POST`   | `/api/groups/{id}/schedule`  | JWT  | Publish + persist group schedule             |
 | `GET`    | `/api/groups/{id}/schedule`  | JWT  | Get the stored group schedule                |
 | `POST`   | `/api/groups/{id}/commands`  | JWT  | Send command to the group controller         |
-| `POST`   | `/api/devices/{id}/livekit-token` | JWT | Mint LiveKit join token (`room=deviceId`)  |
-| `POST`   | `/api/livekit/webhook`       | LiveKit | LiveKit webhook (join/leave → `start/stop_publish`) |
-| `GET`    | `/api/mediamtx/auth`         | None | MediaMTX auth callback (deprecated since 2.11.0, kept for backward compat) |
+| `GET`    | `/api/mediamtx/auth`         | None | MediaMTX auth callback                       |
 
 See [Server Integration](server-integration.md) for details on authentication flows, MQTT communication, and component integration.
 

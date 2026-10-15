@@ -6,7 +6,7 @@ graph TB
 
     subgraph System["VCLane System"]
         App -->|"REST API"| Backend["Backend API — FastAPI"]
-        App -.->|"WebRTC"| Media["Media — LiveKit Cloud (WHIP in / WebRTC out)"]
+        App -.->|"RTSP / WebRTC"| Media["Media Server — MediaMTX"]
 
         Backend -->|"Commands / Overrides"| MQTT["MQTT Broker — EMQX / Mosquitto"]
         Backend -->|"Auth / DB"| Firebase["Firebase Services"]
@@ -31,8 +31,8 @@ graph TB
         Edge1 -->|"Telemetry / Heartbeat"| MQTT
         EdgeN -->|"Telemetry / Heartbeat"| MQTT
 
-        Edge1 -->|"WHIP Stream (annotated, on demand)"| Media
-        EdgeN -->|"WHIP Stream (annotated, on demand)"| Media
+        Edge1 -->|"RTSP Stream"| Media
+        EdgeN -->|"RTSP Stream"| Media
     end
 ```
 
@@ -47,7 +47,7 @@ Under standard operating conditions with active internet connectivity:
 - **Schedule and Override Control:** The Backend API publishes per-group configuration (turns-loop schedule, `schedulingMode: fixed | dynamic`, timing plans) and manual overrides to the MQTT broker. The **ESP-32 Traffic Controller** (connected via WiFi) subscribes to these topics, processes the schedules, and runs the local coordination logic — turns-loop round-robin in `fixed` mode, FIFO queue-based on-demand with all-RED idle in `dynamic` mode.
 - **Local Broadcast:** The ESP-32 broadcasts the target phase states (e.g., green/red durations for each lane) to the group's **Raspberry Pi Edge Devices** using LoRa by default, or via the MQTT `traffic/group/{groupId}/phase` topic when `sync_transport` is `mqtt`/`dual` (same JSON frame, QoS 1, retained).
 - **Actuation:** The Raspberry Pi units receive the phase packets and drive the physical GPIO-connected relays to actuate the traffic signal lamps.
-- **Telemetry and Streaming:** The Raspberry Pis process video streams locally, run YOLO inference for traffic analysis, and publish lean status (signal + emergency flag) and device heartbeats via MQTT. In dynamic mode, new `POST /api/devices/{id}/detections` docs trigger the queue: the backend gates on vehicle allowlist + staleness + RED + not-already-queued, forwards `enqueue` to the controller, and tracks `has_queued_schedule` in RTDB until the controller reports completion. They also publish annotated WHIP video (boxes + track IDs burned in via FFmpeg) to LiveKit room `{deviceId}` — on demand only (idle until `start_publish`), to stay in the free tier.
+- **Telemetry and Streaming:** The Raspberry Pis process video streams locally, run YOLO inference for traffic analysis, and publish lean status (signal + emergency flag) and device heartbeats via MQTT. In dynamic mode, new `POST /api/devices/{id}/detections` docs trigger the queue: the backend gates on vehicle allowlist + staleness + RED + not-already-queued, forwards `enqueue` to the controller, and tracks `has_queued_schedule` in RTDB until the controller reports completion. They also stream live RTSP video feeds to the Media Server.
 
 ### 2. Autonomous Resilient Mode (Offline/Outage Fallback)
 

@@ -55,20 +55,6 @@ Edge stops all aggregate counting; per-vehicle history lives in `detections` and
 
 ---
 
-## [2.11.0] — 2026-10-16
-
-### Feature: LiveKit Cloud for Live Video (MediaMTX kept for backward compat)
-
-Migrate live monitoring from self-hosted MediaMTX RTSP relay to managed LiveKit WebRTC to fix slow routing. Annotated frames stay edge-side (burned in before encode).
-
-#### Summary of Major Changes
-1.  **Ingest:** Pi keeps `Camera → OpenCV → YOLO + ByteTrack → draw boxes/IDs → FFmpeg stdin`; output changes from `RTSP to mediamtx:8554/{deviceId}` to `WHIP to LiveKit room={deviceId}` (H.264 baseline, 720p, ~1–1.5 Mbps, 2 s GOP, transcode-free to avoid `$0.02/min` fee).
-2.  **Auth:** `GET /api/mediamtx/auth` deprecated (kept for backward compat), replaced by `POST /api/devices/{id}/livekit-token` (JWT → LiveKit join token, `room=deviceId`; `publisher=deviceId`, `subscriber=userId`).
-3.  **Playback:** Flutter `media_kit` RTSP placeholder replaced by `livekit_client` `VideoTrackRenderer` on `/devices/:id/stream`. No overlay work needed — annotations are burned in.
-4.  **Cost control (on-demand publish):** Pi idles with no publish by default; backend drives `traffic/device/{id}/commands` `{start_publish/stop_publish}` from LiveKit webhooks (`participant_joined/left`) so the `Build 5k min` free tier is not burned by 24/7 publish (2 cams 24/7 ≈ 86k min/mo). Dual-publish (RTSP + WHIP) during migration; `rtspUrl`, `GET /api/mediamtx/auth`, and `MediaMTX + Caddy /stream/*` are deprecated but kept for backward compat.
-
----
-
 ## [2.6.0] — 2026-10-14
 
 ### Feature: Per-Vehicle Detections in Firestore (via REST)

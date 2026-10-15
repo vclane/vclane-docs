@@ -1,6 +1,6 @@
 # Server Integration
 
-The VCLane server is a Docker Compose stack of three services — Caddy, Backend (FastAPI), and Mosquitto — plus managed LiveKit Cloud for video. The stack manages edge devices and real-time communication; LiveKit fans out annotated WHIP streams to viewers. (MediaMTX deprecated since 2.11.0, kept for backward compat.)
+The VCLane server is a Docker Compose stack of four services — Caddy, Backend (FastAPI), MediaMTX, and Mosquitto — that work together to manage edge devices, relay video streams, and handle real-time communication.
 
 ## Backend API
 
@@ -12,17 +12,19 @@ The backend acts as the centralized management and coordination layer between us
 graph TB
     subgraph Server["VCLane Server (Docker Compose)"]
         Caddy["Reverse Proxy — Caddy<br/>(TLS termination)"]
-        Backend["Backend API — FastAPI<br/>(Auth / Commands / Telemetry / LiveKit tokens)"]
+        Backend["Backend API — FastAPI<br/>(Auth / Commands / Telemetry)"]
+        Media["Media Server — MediaMTX<br/>(RTSP / WebRTC relay)"]
         MQTT["MQTT Broker — Mosquitto<br/>(TLS + Dynamic Security)"]
 
         Caddy -->|"/api/* /ws/* /health"| Backend
-        Backend -->|"join tokens + webhooks"| LiveKit["LiveKit Cloud<br/>(WHIP in / WebRTC out)"]
+        Caddy -->|"/stream/*"| Media
+        Backend -->|"Auth query"| Media
     end
 
     Backend -->|"Auth / DB"| Firebase["Firebase Services<br/>(Auth / Firestore / RTDB)"]
-    MQTT -->|"Commands / Sync / Publish control"| Edge["Raspberry Pi Edge Devices"]
+    MQTT -->|"Commands / Sync"| Edge["Raspberry Pi Edge Devices"]
     Edge -->|"Telemetry / Heartbeat / Ack"| MQTT
-    Edge -->|"WHIP Stream (annotated, on demand)"| LiveKit
+    Edge -->|"RTSP Stream"| Media
 ```
 
 ### Responsibilities
@@ -50,7 +52,7 @@ graph TB
 | Authentication       | Firebase Admin SDK + JWT + bcrypt   |
 | Database             | Firestore                           |
 | Real-Time Telemetry  | Realtime Database                   |
-| Media Server         | LiveKit Cloud (WHIP / WebRTC)       |
+| Media Server         | MediaMTX (RTSP / WebRTC)            |
 | Reverse Proxy        | Caddy                               |
 | API Documentation    | OpenAPI / Swagger                   |
 | Containerization     | Docker + Docker Compose             |
@@ -66,36 +68,45 @@ graph TB
 
 **Real-Time Synchronization** — MQTT command publishing, device heartbeat processing, WebSocket client updates, event notifications.
 
-## Backend ↔ LiveKit (managed SFU)
+## Backend ↔ MediaMTX Authentication
 
-LiveKit Cloud handles all media fan-out. The backend never proxies video — it mints short-lived join tokens and reacts to webhooks for on-demand publishing. (MediaMTX HTTP auth callback `GET /api/mediamtx/auth` deprecated since 2.11.0, kept for backward compat.)
+MediaMTX is configured to delegate authentication to the backend via HTTP callbacks.
 
 ### Configuration
 
-```env
-LIVEKIT_URL=wss://vclane.livekit.cloud
-LIVEKIT_API_KEY=...
-LIVEKIT_API_SECRET=...
+```yaml
+# provisions/mediamtx/mediamtx.dev.yml
+authMethods:
+  - http
+authHTTPAddress: http://backend:8000/api/mediamtx/auth
+```
+
+On every RTSP publish or play action, MediaMTX issues an HTTP GET to the backend:
+
+```
+GET /api/mediamtx/auth?user={user}&password={password}&action={action}&path={path}
 ```
 
 ### Auth Flow
 
-1.  **Viewer:** mobile app calls `POST /api/devices/{id}/livekit-token` with operator JWT → backend returns LiveKit token `{room: deviceId, identity: userId, canSubscribe: true}`. App joins via `livekit_client`.
-2.  **Publisher:** edge Pi fetches its publisher token at register/run (or uses a backend-minted token via MQTT-provisioned secret) → `FFmpeg WHIP POST` to `LIVEKIT_URL` with `room=deviceId, identity=deviceId, canPublish: true`.
-3.  **On-demand:** `POST /api/livekit/webhook` receives `participant_joined/left` → backend publishes `{"command": "start_publish" | "stop_publish", "payload": {}}` to `traffic/device/{id}/commands`. Pi idles with no FFmpeg/WHIP until `start_publish`.
+The backend tries two strategies in order:
 
-No shared RTSP credentials. Tokens expire quickly; room is per-device (`room=deviceId`).
+1. **JWT session auth** — treats `user` as a session token, verified via `verify_session_token()`. Used by human operators viewing streams through the mobile app.
+2. **Device secret auth** — looks up `devices/{deviceId}` in Firestore, retrieves `deviceSecretHash`, verifies the `password` field with bcrypt. Used by edge devices publishing streams.
 
-### Publish Format
+Both strategies return `200 OK` on success or `403 Forbidden` on failure. No path-level or action-level authorization is enforced beyond credential verification.
 
-When a device is provisioned, it receives a LiveKit room name equal to `deviceId`:
+### RTSP URL Format
+
+When a device is provisioned, it receives an RTSP URL of the form:
 
 ```
-room: {deviceId}, identity(publisher): {deviceId} via WHIP (H.264 baseline, 720p, 2 s GOP)
+rtsp://{deviceId}@mediamtx:8554/{deviceId}
 ```
 
-- Annotation is burned in on the Pi (`OpenCV → YOLO+ByteTrack → draw → FFmpeg stdin → WHIP`) — LiveKit carries the annotated frames opaquely, transcode-free.
-- Viewers join the same `room=deviceId` as subscribers only.
+- The `deviceId` serves as the RTSP username (sent as `user` in the auth callback).
+- The `deviceSecret` serves as the RTSP password (sent as `password`).
+- The path (same as `deviceId`) is used by MediaMTX to identify the stream.
 
 ---
 
@@ -144,9 +155,9 @@ All inbound handlers parse the topic to extract `deviceId` (third segment) and r
 1. Admin calls `POST /api/devices` (JWT required) with `{deviceId, name, location}`.
 2. Backend generates a device secret: `vcl-{32 hex chars}`.
 3. Secret is bcrypt-hashed and stored in Firestore at `devices/{deviceId}.deviceSecretHash`.
-4. LiveKit room is `room={deviceId}` (publisher joins via WHIP with a backend-minted token). RTSP URL is still constructed as `rtsp://{deviceId}@mediamtx:8554/{deviceId}` for backward compat (deprecated since 2.11.0).
+4. RTSP URL is constructed: `rtsp://{deviceId}@mediamtx:8554/{deviceId}`.
 5. Mosquitto user is created via two Dynamic Security RPCs: `publish_dynsec("createClient", ...)` to create the MQTT client, then `publish_dynsec("addClientRole", ...)` to assign the `device` role.
-6. Response returns `{deviceId, deviceSecret, rtspUrl, livekitRoom}` — the plaintext secret is only returned once. `rtspUrl` is deprecated since 2.11.0 but kept for backward compat.
+6. Response returns `{deviceId, deviceSecret, rtspUrl}` — the plaintext secret is only returned once.
 
 ### Device Authentication (End-to-End)
 
@@ -154,7 +165,7 @@ All inbound handlers parse the topic to extract `deviceId` (third segment) and r
 sequenceDiagram
     participant Edge as Edge Device
     participant MQTT as Mosquitto
-    participant LK as LiveKit Cloud
+    participant MTX as MediaMTX
     participant API as Backend API
     participant DB as Firestore
 
@@ -162,19 +173,29 @@ sequenceDiagram
     MQTT->>MQTT: verify via Dynamic Security Plugin
     MQTT-->>-Edge: Role-based ACL granted<br/>(own device topics + group topics)
 
-    Edge->>+API: POST /api/devices/{id}/livekit-token (device creds)<br/>or provisioned publisher token
-    API-->>-Edge: LiveKit token (room=deviceId, canPublish)
+    Edge->>+MTX: RTSP publish<br/>rtsp://deviceId@mediamtx:8554/deviceId
+    MTX->>+API: GET /api/mediamtx/auth<br/>?user=deviceId&password=deviceSecret
+    Note over API: JWT verify fails → device auth
 
-    Edge->>+LK: WHIP publish (annotated H.264)<br/>room=deviceId
-    LK-->>-Edge: Publishing (on demand via start_publish)
+    API->>+DB: read devices/{deviceId}.deviceSecretHash
+    DB-->>-API: bcrypt hash
+    API->>API: bcrypt.checkpw(secret, hash)
 
-    loop Device lifecycle
-        Edge->>MQTT: telemetry/heartbeat
-        MQTT->>API: forward to handler
-        API->>DB: write to RTDB /telemetry/{id}
-        API->>MQTT: publish commands to topic
-        MQTT->>Edge: deliver command (incl. start/stop_publish)
-        Edge->>MQTT: acknowledgement
+    alt valid credentials
+        API-->>-MTX: 200 OK
+        MTX-->>-Edge: Stream accepted
+
+        loop Device lifecycle
+            Edge->>MQTT: telemetry/heartbeat
+            MQTT->>API: forward to handler
+            API->>DB: write to RTDB /telemetry/{id}
+            API->>MQTT: publish commands to topic
+            MQTT->>Edge: deliver command
+            Edge->>MQTT: acknowledgement
+        end
+    else invalid credentials
+        API-->>MTX: 403 Forbidden
+        MTX-->>Edge: Stream rejected
     end
 ```
 
@@ -318,10 +339,8 @@ docker compose up -d mosquitto
 | -------- | ------------------------------ | -------- | -------------------------------- | ---------------------------------------------------------------- |
 | `POST`   | `/api/devices`                 | JWT      | Create device + provision secret | `add_mosquitto_user()` via Dynamic Security RPC                  |
 | `DELETE` | `/api/devices/{id}`            | JWT      | Delete device                    | `remove_mosquitto_user()` via Dynamic Security RPC               |
-| `POST`   | `/api/devices/{id}/commands`   | JWT      | Send arbitrary command           | MQTT publish to `traffic/device/{id}/commands` (incl. `start_publish` / `stop_publish`) |
+| `POST`   | `/api/devices/{id}/commands`   | JWT      | Send arbitrary command           | MQTT publish to `traffic/device/{id}/commands`                   |
 | `POST`   | `/api/devices/{id}/signal`     | JWT      | Override traffic signal          | MQTT publish + Firestore write                                   |
 | `POST`   | `/api/devices/{id}/detections` | JWT      | Submit per-vehicle detection     | Storage upload + Firestore `detections` write (no MQTT, no RTDB) |
 | `POST`   | `/api/groups/{id}/sync`        | JWT      | Trigger group prepare            | MQTT publish to `traffic/group/{id}/prepare`                     |
-| `POST`   | `/api/devices/{id}/livekit-token` | JWT   | Mint LiveKit join token          | Returns `{token, room, url}`; no MQTT/RPC side-effect            |
-| `POST`   | `/api/livekit/webhook`         | LiveKit  | LiveKit webhook receiver         | Publishes `start/stop_publish` to `traffic/device/{id}/commands` |
-| `GET`    | `/api/mediamtx/auth`           | _(none)_ | MediaMTX auth callback (deprecated since 2.11.0, kept for backward compat) | Reads Firestore, bcrypt verify |
+| `GET`    | `/api/mediamtx/auth`           | _(none)_ | MediaMTX auth callback           | Reads Firestore, bcrypt verify                                   |
