@@ -68,7 +68,7 @@ graph TB
 
 | Method   | Path                         | Auth | Purpose                                      |
 | -------- | ---------------------------- | ---- | -------------------------------------------- |
-| `GET`    | `/health`                    | None | Health check                                 |
+| `GET`    | `/health`                    | None | Health check: `{"status": "ok", "mqtt": {"connected": bool}}`  |
 | `POST`   | `/api/auth/verify`           | None | Verify Firebase ID token, return session JWT |
 | `GET`    | `/api/devices`               | JWT  | List all devices                             |
 | `POST`   | `/api/devices`               | JWT  | Create device + provision secret             |

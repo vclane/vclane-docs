@@ -116,10 +116,14 @@ The backend connects to Mosquitto as an internal MQTT client to receive telemetr
 
 ### Connection
 
-- Client ID: `vclane-backend`
+- Client ID: `vclane-backend-{pid}-{random}` (one client per uvicorn worker)
 - Host: `mosquitto:1883` (internal Docker network, no TLS)
 - Password: `vclane-backend` — matches the admin client bootstrapped in the Dynamic Security config
 - The `admin` role grants access to all traffic topics plus `$CONTROL/dynamic-security/#` for Dynamic Security administration
+- Connect is asynchronous (`connect_async` + `loop_start`) with a 1–30 s exponential reconnect backoff; a broker restart, network drop, or slow broker start is retried indefinitely
+- On every successful (re)connect the client re-subscribes to all topics listed below
+- Outbound publishes use QoS 1, are queued locally (max 1000 messages) while disconnected, and their return code is checked and logged on failure
+- `GET /health` includes `mqtt.connected` so a deaf backend is visible
 
 ### Subscriptions
 

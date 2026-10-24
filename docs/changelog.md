@@ -4,6 +4,19 @@ This changelog tracks system-wide architectural modifications. Submodule develop
 
 ---
 
+## [2.12.1] — 2026-10-24
+
+### Backend MQTT Client Reconnects After Disconnects
+
+#### Summary of Major Changes
+1.  **Automatic reconnect:** the backend MQTT client now uses `connect_async()` + `loop_start()` with a 1–30 s exponential backoff. A broker restart, network drop, or a broker that is not ready when the backend starts no longer leaves the backend permanently deaf. Every successful (re)connect re-subscribes all inbound topics.
+2.  **QoS 1 outbound:** commands, schedules, prepare, overrides, and `enqueue` publish at QoS 1. The paho return code is checked; while disconnected, QoS 1 messages are queued locally (bounded at 1000) and flushed after reconnect.
+3.  **Visible failures:** `on_disconnect` / `on_connect_fail` log warnings, and `GET /health` reports `{"status": "ok", "mqtt": {"connected": bool}}` (always HTTP 200; this is a liveness probe, not readiness).
+4.  **Truthful queue bookkeeping:** RTDB `has_queued_schedule` is set only when the broker accepted the `enqueue` publish; a failed publish leaves the detection `enqueued: false`.
+5.  **Backend-only:** topics and payloads are unchanged; no controller or edge change is required.
+
+---
+
 ## [2.12.0] — 2026-10-24
 
 ### Admin Force-Enqueue, Group Enqueue Switch, Non-Deduped FIFO, Optional Detection Image
