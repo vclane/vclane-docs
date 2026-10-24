@@ -30,7 +30,7 @@ traffic/
         {deviceId}/
             telemetry       # Publish lean telemetry (signal + emergency flag)
             heartbeat       # Publish device status
-            status          # LWT (Last Will & Testament) online/offline
+            status          # Retained online status + LWT (online: true/false)
             commands        # Subscribe to firmware updates/reboots
             acknowledgements# Publish command completion reports
 
@@ -114,7 +114,19 @@ traffic/
 
 `queueDoneDeviceId` tells the backend to clear `has_queued_schedule` for that device in RTDB. `queueDepth` is the remaining FIFO depth after completion. When the queue is empty the controller broadcasts all-RED.
 
-**Device Monitoring** — Online/offline tracking for all hardware via LWT (Last Will and Testament) topics and connection status reporting.
+**Device Monitoring (Retained Status + LWT)** — Every edge device publishes its connection state to `traffic/device/{deviceId}/status` with **QoS 1 and the retain flag set**:
+
+```json
+{ "deviceId": "intersection-01", "online": true, "timestamp": "2026-07-24T10:00:00Z" }
+```
+
+- **On connect:** the device publishes `online: true`, replacing any stale retained state in the broker.
+- **Graceful shutdown:** the device publishes `online: false` before it sends DISCONNECT (MQTT 3.1.1 does not fire the will on a clean disconnect).
+- **Ungraceful loss:** the connect also registers a **retained** Last Will & Testament on the same topic with `{"online": false}`. The broker publishes it automatically when the connection drops (network loss, crash, power cut) after roughly 1.5 × the MQTT keepalive (60 s default → ~90 s detection).
+
+The backend subscribes to `traffic/device/+/status`, mirrors `online` into RTDB `/telemetry/{deviceId}.online`, and refreshes `lastSeen`. There is no backend timeout checker. Because the messages are retained, a backend restart re-reads the last known state immediately.
+
+> Broker ACL: the `device` role must allow `publishClientSend traffic/device/%u/status`; otherwise both the status publish and the will are denied.
 
 **Traffic Synchronization** — Coordinated intersection timing is managed locally within each group by the ESP-32 Traffic Controller via LoRa radio broadcasts by default, eliminating the need for complex, latency-sensitive multi-device MQTT coordination protocols.
 

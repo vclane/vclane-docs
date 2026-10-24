@@ -157,6 +157,7 @@ Responsibilities:
 - Publish lean AI traffic telemetry — the sole telemetry source in the system (emergency-vehicle flag + active signal only; no counts — history lives in `detections`)
 - Report the currently actuated traffic light phase (from LoRa) or caution state
 - Send heartbeat updates (process uptime and timestamp)
+- Maintain the retained `status` topic (`online: true` on connect, `online: false` on graceful shutdown) and register a Last Will & Testament so the broker reports ungraceful disconnects
 - Submit per-vehicle detections via `POST /api/devices/{id}/detections` (one multipart request per new ByteTrack ID: `trackId`, `class`, `deviceTimestamp`, required `image` full annotated frame; bounded queue, hold/retry offline).
 
 > Dynamic queue gate triggers off `POST /api/devices/{id}/detections` (new-doc only), not telemetry. Dedup is server-side via doc-ID existence + RTDB `has_queued_schedule` — the edge keeps uploading normally and never tracks queue state itself.
@@ -186,6 +187,7 @@ Each edge device periodically reports its status to the backend over MQTT:
 
 - **Telemetry** (`traffic/device/{deviceId}/telemetry`): active signal (or `RED` during fallback) + emergency-vehicle flag (`emergencyVehicleDetected` / `emergencyClass` / `emergencyConfidence`). No counts. Dynamic queue trigger moved to `POST /api/devices/{id}/detections`.
 - **Heartbeat** (`traffic/device/{deviceId}/heartbeat`): process uptime and timestamp
+- **Status / LWT** (`traffic/device/{deviceId}/status`, QoS 1, retained): `{"online": true}` published on every successful connect, `{"online": false}` published before a graceful disconnect, and a retained will of `{"online": false}` published by the broker when the connection drops without a clean DISCONNECT. Detection of an ungraceful loss takes up to ~1.5 × the MQTT keepalive (`mqtt_keepalive`, 60 s default).
 
 ## Software Architecture
 

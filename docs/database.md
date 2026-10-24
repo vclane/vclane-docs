@@ -91,8 +91,8 @@ This path is updated on every heartbeat and telemetry message from the edge devi
 | ---------------------- | --------------- | ------------------- | ------------------------------------------------------------------------------------------------- |
 | _(device fields)_      | _various_       | Device payload      | Device-specific data (currentTrafficLightSignal, emergencyVehicleDetected, emergencyClass, emergencyConfidence, etc. — no counts) |
 | `timestamp`            | `string \| int` | Device payload      | Device-local timestamp                                                                            |
-| `online`               | `bool`          | Injected by backend | `True` — set on every heartbeat or telemetry, `False` — set by goodbye message or timeout checker |
-| `lastSeen`             | `int`           | Injected by backend | Server Unix timestamp of the most recent heartbeat or telemetry                                   |
+| `online`               | `bool`          | Injected by backend | `True` — set on every heartbeat, telemetry, or retained `status` online message; `False` — set by the retained `status` offline message or the device LWT |
+| `lastSeen`             | `int`           | Injected by backend | Server Unix timestamp of the most recent heartbeat, telemetry, or `status` message (informational only — never used to derive `online`) |
 | `has_queued_schedule`  | `bool`          | Backend queue gate  | `True` — device has a pending/ongoing queued GREEN in dynamic mode; `False` — default/idle        |
 | `queuedAt`             | `int \| null`   | Backend queue gate  | Server Unix timestamp of the last `enqueue`, cleared (`null`) on `queue-done`                     |
 
@@ -119,10 +119,16 @@ Example document (tracking enabled, dynamically queued):
 
 ### Offline detection
 
-Devices are marked offline through three mechanisms:
+Edge devices publish their connection state to `traffic/device/{deviceId}/status` (QoS 1, retained):
+`{"online": true}` on connect and `{"online": false}` on graceful shutdown. The backend mirrors that state into `/telemetry/{deviceId}.online`. A connection that drops without a clean DISCONNECT is covered by the Last Will & Testament, which is configured as a **retained** `{"online": false}` message on the same topic.
 
-| Mechanism                 | Trigger                                                                                   | Latency   |
-| ------------------------- | ----------------------------------------------------------------------------------------- | --------- |
-| **Goodbye message**       | Device publishes to `traffic/device/{id}/goodbye` on graceful shutdown                    | Instant   |
-| **Last Will & Testament** | Broker publishes device's pre-set LWT on ungraceful disconnect                            | Instant   |
-| **Timeout checker**       | Backend background task runs every 30s, marks devices offline when `lastSeen` is >60s old | Up to 60s |
+There is no background timeout checker — `online` is event-driven. `lastSeen` is still refreshed for display purposes but no longer drives the online flag.
+
+| Mechanism                            | Trigger                                                                                              | Latency                                            |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| **Retained status (graceful)**       | Device publishes `{"online": false}` (retained) to `traffic/device/{id}/status` before disconnecting | Instant                                            |
+| **Last Will & Testament**            | Broker publishes the device's pre-set retained will (`{"online": false}`) on ungraceful disconnect   | ≤ 1.5 × MQTT keepalive (~90 s at the 60 s default) |
+| **Heartbeat / telemetry safety net** | Any telemetry or heartbeat sets `online: true` again                                                 | One publish interval (≤ 30 s)                      |
+
+> **Note:** Because the status messages are retained, a backend restart immediately re-reads the last known state for every device instead of waiting for a timeout. Devices running firmware without LWT support have no offline transition of their own — they must be upgraded, or be marked offline explicitly (e.g. `goodbye`, or the controller offline cascade).
+

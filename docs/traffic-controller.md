@@ -175,22 +175,60 @@ stateDiagram-v2
 5.  **Detection:** one `POST /api/devices/{id}/detections` per new tracked vehicle (gated server-side by allowlist + staleness + RED + not-already-queued).
 6.  **Overrides win:** A manual `signal_override` / `cancel_override` preempts the queue per the envelope below; the queue resumes after override expiry/cancel.
 
+### Dynamic Queueing Flow
+
+```mermaid
+flowchart TB
+    IDLE0["1. Idle<br/>all-RED broadcast"]
+    DET["2. Detection<br/>New ByteTrack ID<br/>POST /detections"]
+    G1{"3. Group dynamic?"}
+    G2{"4. Vehicle class<br/>allowlisted?"}
+    G3{"5. Fresh?<br/>timestamp <= ~30s?"}
+    G4{"6. RED +<br/>not already queued?"}
+    DROP["Store only<br/>no queue"]
+    ENQ["7. Enqueue<br/>commands enqueue(deviceId)<br/>RTDB has_queued=true"]
+    PUSH["8. Controller FIFO<br/>push (dup-suppressed)"]
+    GREEN["9. Serve head<br/>GREEN greenSec<br/>LoRa broadcast"]
+    CLEAR["10. Clearance<br/>all-RED allRedSec"]
+    QDONE["11. queue-done<br/>queueDoneDeviceId + depth"]
+    CLEARED["12. Backend clears<br/>has_queued=false"]
+    IDLE1["13. Queue empty?<br/>return to all-RED idle"]
+    IDLE0 --> DET --> G1
+    G1 -- yes --> G2
+    G1 -- no --> DROP
+    G2 -- yes --> G3
+    G2 -- no --> DROP
+    G3 -- yes --> G4
+    G3 -- no, stale --> DROP
+    G4 -- yes --> ENQ
+    G4 -- no: GREEN or queued --> DROP
+    ENQ --> PUSH --> GREEN --> CLEAR --> QDONE --> CLEARED --> IDLE1
+```
+
 ```mermaid
 sequenceDiagram
     participant A as Edge A
     participant S as Backend
     participant C as Controller
     participant B as Edge B
+    Note over C: all-RED idle
     A->>S: POST /detections(A, RED)
-    S->>S: RED + has_queued=false? → enqueue
+    S->>S: gate: dynamic + allowlist + fresh + RED + not-queued
     S->>C: commands enqueue(A)
-    C->>A: LoRa GREEN(A) / RED(B)
+    S->>S: RTDB has_queued(A)=true
+    C->>A: LoRa GREEN(A) / RED(B) [greenSec]
     B->>S: POST /detections(B, RED)
     S->>C: commands enqueue(B)
-    C->>A: LoRa all-RED clearance
-    C->>S: queue-done(A)
-    C->>B: LoRa GREEN(B)
-    C->>S: queue-done(B)
+    S->>S: RTDB has_queued(B)=true
+    B->>S: POST /detections(B, RED) retry
+    S->>S: drop: has_queued(B)=true (dedup)
+    C->>A: LoRa all-RED clearance [allRedSec]
+    C->>S: queue-done(A, depth=1)
+    S->>S: RTDB has_queued(A)=false
+    C->>B: LoRa GREEN(B) [greenSec]
+    C->>A: LoRa all-RED clearance [allRedSec]
+    C->>S: queue-done(B, depth=0)
+    S->>S: RTDB has_queued(B)=false
     C->>A: LoRa all-RED idle
 ```
 

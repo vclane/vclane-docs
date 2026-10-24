@@ -141,7 +141,7 @@ No `autoDispose` is used — all providers are global singletons for the app lif
 | `SignalOverride` | deviceId, targetSignal, requestedAt                                           |
 | `Detection`      | deviceId, groupId, timestamp (server), deviceTimestamp, trackId, class (any YOLO label), imageUrl (required) |
 
-> **Note:** Online/offline state and last-seen timestamps are tracked in the Realtime Database at `/telemetry/{deviceId}`, not in Firestore. The `online` field is set to `true` on every heartbeat or telemetry, and `false` via goodbye message, LWT, or background timeout checker. This avoids excessive Firestore writes from frequent updates.
+> **Note:** Online/offline state and last-seen timestamps are tracked in the Realtime Database at `/telemetry/{deviceId}`, not in Firestore. The `online` field is set to `true` on every heartbeat, telemetry, or retained `status` online message, and to `false` via the retained device `status` topic (graceful shutdown or broker-published LWT). There is no backend timeout checker. This avoids excessive Firestore writes from frequent updates.
 
 > **Note:** `vehicleToday` was removed from RTDB telemetry. "Vehicles detected today" is a direct Firestore query on `detections` (no REST read path):
 >

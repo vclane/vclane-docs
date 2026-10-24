@@ -4,6 +4,22 @@ This changelog tracks system-wide architectural modifications. Submodule develop
 
 ---
 
+## [2.11.0] — 2026-10-24
+
+### Edge Online Status via Retained LWT (Timeout Checker Removed)
+
+Edge devices now own their online/offline state over MQTT. The backend's periodic `lastSeen` timeout checker is removed; online transitions arrive as broker-published will messages and retained status messages.
+
+#### Summary of Major Changes
+1.  **Retained device `status` topic + LWT:** on connect the edge registers a retained will `{"online": false}` on `traffic/device/{deviceId}/status`, publishes retained `{"online": true}` after a successful connect, and publishes retained `{"online": false}` before a graceful DISCONNECT (MQTT 3.1.1 does not fire the will on a clean disconnect). QoS 1, `retain: true`. This mirrors the ESP-32 controller's existing `traffic/group/{groupId}/status` contract.
+2.  **Keepalive is the offline latency:** the broker publishes the will after ~1.5 × the MQTT keepalive. New `mqtt_keepalive` setting / `--mqtt-keepalive` CLI flag on the edge, default `60` s (~90 s worst-case detection). Lower it if faster detection is required.
+3.  **Backend consumes `traffic/device/+/status`:** new `_handle_device_status` — `online: true` refreshes `online` + `lastSeen` without touching telemetry fields, `online: false` marks the device offline. The backend's `OnlineChecker` (30 s loop, marks stale at 60 s) is deleted along with its `main.py` wiring, for both `/telemetry` and `/controllers`.
+4.  **Broker ACL:** the `device` role gains `publishClientSend traffic/device/%u/status`. Existing deployments must apply the ACL (reset the `mosquitto_data` Dynamic Security volume or issue `addRoleACL`) or the status/will publish is denied.
+5.  **Telemetry/heartbeat unchanged:** both still inject `online: true` + `lastSeen` as a self-healing safety net and for backward compatibility. `lastSeen` becomes informational and no longer drives online state.
+6.  **Legacy `goodbye` handler kept:** the `traffic/device/{id}/goodbye` handler stays for older firmware; new firmware marks itself offline via the retained `status` message instead.
+
+---
+
 ## [2.10.0] — 2026-10-15
 
 ### Edge: Backend Login at Device Startup

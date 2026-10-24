@@ -123,13 +123,14 @@ The backend connects to Mosquitto as an internal MQTT client to receive telemetr
 
 ### Subscriptions
 
-On connect, the backend subscribes to six wildcard topics plus the Dynamic Security response topic:
+On connect, the backend subscribes to the wildcard topics below plus the Dynamic Security response topic:
 
 | Topic Pattern                       | Handler                   | Destination                                                                                                |
 | ----------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `traffic/device/+/telemetry`        | `_handle_telemetry`       | Writes to RTDB at `/telemetry/{deviceId}` — injects `online: true` and `lastSeen` (no queue gate)          |
 | `traffic/device/+/heartbeat`        | `_handle_heartbeat`       | Same as telemetry (no queue gate)                                                                          |
-| `traffic/device/+/goodbye`          | `_handle_goodbye`         | Sets `online: false` on `/telemetry/{deviceId}`                                                            |
+| `traffic/device/+/status`           | `_handle_device_status`   | Retained LWT/status topic — `online: true` refreshes `online` + `lastSeen`; `online: false` marks the device offline |
+| `traffic/device/+/goodbye`          | `_handle_goodbye`         | Sets `online: false` on `/telemetry/{deviceId}` (legacy firmware path)                                     |
 | `traffic/device/+/acknowledgements` | `_handle_ack`             | Logs the payload — no persistence or callback                                                              |
 | `traffic/group/+/queue-done`        | `_handle_queue_done`      | Processes controller `queueDoneDeviceId` → clears `has_queued_schedule`                                    |
 | `traffic/group/+/prepare-response`  | _(no handler)_            | Subscribed but not processed                                                                               |
