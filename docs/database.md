@@ -35,10 +35,13 @@ Firestore stores long-lived documents in collections. It is used for device meta
 | `schedule`       | `map`       | Repeating turns loop `{turns: [{durationSeconds, phases}]}` (see Backend API) |
 | `schedulingMode` | `string`    | Per-group executor: `"fixed"` (turns loop, default) or `"dynamic"` (FIFO queue) |
 | `dynamicConfig`  | `map`       | Dynamic queue timings: `{greenSec, allRedSec}` (2-channel GREEN/RED relays) |
+| `enqueueEdgeDetections` | `bool` | Queue gate switch (default `true`): when `false`, new detections are stored but never enqueued |
 | `createdAt`      | `Timestamp` | Document creation time                                                   |
 | `updatedAt`      | `Timestamp` | Last document update time                                                |
 
 > **Note:** `schedulingMode` is per-group. `fixed` runs the stored turns loop; `dynamic` runs queue-based on-demand scheduling (see [Traffic Controller](traffic-controller.md)). The mode and timings are delivered to the controller via `traffic/group/{groupId}/schedule` and cached in NVS.
+
+> **Note:** `enqueueEdgeDetections` is backend-only and is **not** delivered to the controller. Missing values on legacy documents are treated as `true`. It governs normal edge detections only — an admin `forceEnqueue` detection bypasses it, and signal overrides are unaffected.
 
 #### `users/{uid}`
 
@@ -73,9 +76,14 @@ One document per detected vehicle, written by the backend when the edge posts to
 | `deviceTimestamp` | `string \| int` | Edge crossing time passthrough (part of dedup key)   |
 | `trackId`         | `int \| string` | ByteTrack ID (part of dedup key)                     |
 | `class`           | `string`    | YOLO label, unfiltered (any class)                       |
-| `imageUrl`        | `string`    | Firebase Storage download URL of the detection frame — **required** |
+| `imageUrl`        | `string \| null` | Firebase Storage download URL of the detection frame — `null` when no image was supplied |
+| `forceEnqueueRequested` | `bool` | Caller sent `forceEnqueue=true` (admin-only test path) |
+| `enqueueEdgeDetections` | `bool` | Snapshot of the group's queue switch at write time     |
+| `enqueued`        | `bool`      | Whether an `enqueue` was actually published (`false` = stored only) |
 
-> **Note:** `imageUrl` is required — events without an image are rejected. Mobile queries this collection directly (no REST read path). Required composite indexes: `(deviceId, timestamp DESC)`, `(groupId, timestamp DESC)`. Security rules: signed-in operators may read; writes are backend-only (`write: false`, Admin SDK bypasses rules).
+> **Note:** `imageUrl` is nullable. Edge uploads normally include an image, but the admin detection tool sends none, so `imageUrl` is `null` and no Storage object is created. Mobile queries this collection directly (no REST read path). Required composite indexes: `(deviceId, timestamp DESC)`, `(groupId, timestamp DESC)`. Security rules: signed-in operators may read; writes are backend-only (`write: false`, Admin SDK bypasses rules).
+
+> **Note:** `forceEnqueueRequested`, `enqueueEdgeDetections`, and `enqueued` are the queue audit trail. They are written by the backend only. `enqueued: false` means the detection was stored without queueing — for example because the group is `fixed`, `enqueueEdgeDetections` is `false`, a gate check failed, or no enqueue was published.
 
 ## Realtime Database (RTDB)
 
@@ -96,7 +104,7 @@ This path is updated on every heartbeat and telemetry message from the edge devi
 | `has_queued_schedule`  | `bool`          | Backend queue gate  | `True` — device has a pending/ongoing queued GREEN in dynamic mode; `False` — default/idle        |
 | `queuedAt`             | `int \| null`   | Backend queue gate  | Server Unix timestamp of the last `enqueue`, cleared (`null`) on `queue-done`                     |
 
-> **Note:** `has_queued_schedule` / `queuedAt` are only used when the device's group has `schedulingMode: "dynamic"`. They are written **only by the backend** (set on `enqueue`, cleared on controller `queue-done`); edge devices never write them. They provide dedup: while `has_queued_schedule` is `true`, further detections for that device do not trigger another enqueue.
+> **Note:** `has_queued_schedule` / `queuedAt` are only used when the device's group has `schedulingMode: "dynamic"`. They are written **only by the backend** (set on `enqueue`, cleared on controller `queue-done`); edge devices never write them. They provide dedup: while `has_queued_schedule` is `true`, further detections for that device do not trigger another enqueue. The gate does not set them when the group has `enqueueEdgeDetections: false` (unless an admin sends `forceEnqueue=true`). This flag is per device, not per queue entry: the controller may hold duplicate entries for one device, and the first `queue-done` clears the flag while another duplicate is still pending.
 
 > **Note:** `vehicleToday` has been **removed** from `/telemetry/{deviceId}` and must not be written. "Vehicles detected today" is derived by counting `detections` documents with `timestamp >= startOfDay` — see `detections/{detectionId}` above.
 

@@ -145,7 +145,7 @@ All inbound handlers parse the topic to extract `deviceId` (third segment) and r
 | `POST /api/devices/{id}/signal`   | `traffic/device/{id}/commands` | `{"command": "signal_override", "payload": {"targetSignal": "..."}}`                 |
 | `POST /api/groups/{id}/commands`  | `traffic/group/{id}/commands`  | `{"command": "signal_override", "payload": {"phases": {...}, "durationSeconds": N}}` |
 | `POST /api/groups/{id}/sync`      | `traffic/group/{id}/prepare`   | `{"deviceIds": ["id1", "id2", ...]}`                                                 |
-| Dynamic queue gate (auto)         | `traffic/group/{gid}/commands` | `{"command": "enqueue", "payload": {"deviceId": "..."}}`                             |
+| Dynamic queue gate (auto)         | `traffic/group/{gid}/commands` | `{"command": "enqueue", "payload": {"deviceId": "..."}}` — admin `forceEnqueue` bypasses the gate and `enqueueEdgeDetections` |
 
 ---
 
@@ -222,13 +222,17 @@ The backend also writes a Firestore document to `signalOverrides/{id}` with `{de
 { "command": "cancel_override", "payload": {} }
 ```
 
-`durationSeconds <= 0` is indefinite. The ESP-32 controller pauses its schedule turn-loop while an override is active and uses the override phases in its place; on expiry/cancel it resumes the same turn it paused on but restarts that turn's full duration from the beginning — remaining time is not preserved.
+`durationSeconds` `0` is indefinite; a positive value is a fixed duration; a negative value causes the controller to reject the whole command. The ESP-32 pauses its schedule turn-loop (or the dynamic queue) while an override is active and uses the override phases in its place. Device IDs omitted from `phases` are not broadcast, so those edge devices enter caution/solid RED; the device-level `POST /api/devices/{id}/signal` path fills the rest of the group with the inverse signal. On expiry/cancel the controller resumes the same turn (or the interrupted queue phase) but restarts its full duration — remaining time is not preserved.
+
+Group commands are fire-and-forget: any authenticated user may send them, the backend returns `202 {"status": "sent", "groupId": ...}` without validating `command`/`payload`, and no `signalOverrides` audit document is written (only the device-level `/signal` endpoint writes one).
 
 **Queue enqueue (dynamic mode)** — published automatically by the queue gate to `traffic/group/{groupId}/commands`:
 
 ```json
 { "command": "enqueue", "payload": { "deviceId": "intersection-01" } }
 ```
+
+The controller appends exactly one FIFO entry per `enqueue` and does **not** dedupe: duplicates and the currently-GREEN device are accepted, so a queue of `cam1 | cam1 | cam2` serves all three in order. Only an empty `deviceId` or a full queue (16 entries) is rejected. Normal edge detections are deduped upstream via `has_queued_schedule`; an admin `forceEnqueue` bypasses that dedup.
 
 **Group sync** (published on `POST /api/groups/{id}/sync`):
 
@@ -242,22 +246,33 @@ Edge devices in the group respond on `traffic/group/{groupId}/prepare-response`.
 
 ### Dynamic Queue Gate (per-group `schedulingMode: "dynamic"`)
 
-No new topics — the gate triggers off `POST /api/devices/{id}/detections` (new docs only). Telemetry no longer triggers enqueue.
+No new topics — the gate triggers off `POST /api/devices/{id}/detections` (new docs only). Telemetry never triggers enqueue.
+
+**Authorization:** `forceEnqueue=true` requires `users/{uid}.role == "admin"` (the JWT carries only `sub`); otherwise the endpoint returns `403` before writing anything.
 
 **On `POST /api/devices/{deviceId}/detections` (new doc, not `deduped:true`):**
 
 ```
 group = Firestore lookup via devices/{deviceId}.groupId (already resolved)
-if group.schedulingMode != "dynamic": return  # fixed path: store only
-if payload.class not in vehicle allowlist: return  # detections are unfiltered; pedestrians must not queue
-if now - deviceTimestamp > ~30s: return           # stale (offline retry burst) → store only, no queue
-state = RTDB /telemetry/{deviceId}            # {currentTrafficLightSignal, has_queued_schedule}
-if state.currentTrafficLightSignal != "RED": drop   # already GREEN → already served
-if state.has_queued_schedule == true: drop          # dedup pending/ongoing request
+if group is None or group.schedulingMode != "dynamic": return  # store only
+if request.forceEnqueue:
+    # wins over enqueueEdgeDetections and skips every check below
+    enqueue
+elif group.enqueueEdgeDetections is false:
+    return                              # audit-only: store the detection
 else:
+    if class not in vehicle allowlist: return   # pedestrians must not queue
+    if now - deviceTimestamp > 180s: return     # stale offline retry → store only
+    if currentTrafficLightSignal not in {RED, CAUTION}: return  # already served
+    if has_queued_schedule == true: return      # dedup a pending/ongoing serve
+    enqueue
+
+enqueue:
     publish {"command": "enqueue", "payload": {"deviceId"}} to traffic/group/{groupId}/commands
     RTDB update /telemetry/{deviceId}: {has_queued_schedule: true, queuedAt: now}
 ```
+
+A gate failure is logged and never changes the `201`; the detection's `enqueued` audit field records the outcome. `forceEnqueue` still requires `schedulingMode: "dynamic"` — against a `fixed` group it stores only, because the controller ignores `enqueue` outside dynamic mode.
 
 **On `traffic/group/{groupId}/queue-done` with `queueDoneDeviceId`:**
 
@@ -265,7 +280,7 @@ else:
 RTDB update /telemetry/{queueDoneDeviceId}: {has_queued_schedule: false, queuedAt: null}
 ```
 
-When the controller's FIFO empties it broadcasts all-RED; no backend action is needed for the idle state.
+When the controller's FIFO empties it broadcasts all-RED; no backend action is needed for the idle state. `has_queued_schedule` is a per-device boolean, not a per-entry counter: with duplicate forced entries the first completion clears it while another duplicate may still be pending.
 
 ---
 
@@ -342,6 +357,6 @@ docker compose up -d mosquitto
 | `DELETE` | `/api/devices/{id}`            | JWT      | Delete device                    | `remove_mosquitto_user()` via Dynamic Security RPC               |
 | `POST`   | `/api/devices/{id}/commands`   | JWT      | Send arbitrary command           | MQTT publish to `traffic/device/{id}/commands`                   |
 | `POST`   | `/api/devices/{id}/signal`     | JWT      | Override traffic signal          | MQTT publish + Firestore write                                   |
-| `POST`   | `/api/devices/{id}/detections` | JWT      | Submit per-vehicle detection     | Storage upload + Firestore `detections` write (no MQTT, no RTDB) |
+| `POST`   | `/api/devices/{id}/detections` | JWT      | Submit per-vehicle detection (admin-only `forceEnqueue`) | Optional Storage upload + Firestore `detections` write; may publish `enqueue` and set RTDB queue flags |
 | `POST`   | `/api/groups/{id}/sync`        | JWT      | Trigger group prepare            | MQTT publish to `traffic/group/{id}/prepare`                     |
 | `GET`    | `/api/mediamtx/auth`           | _(none)_ | MediaMTX auth callback           | Reads Firestore, bcrypt verify                                   |

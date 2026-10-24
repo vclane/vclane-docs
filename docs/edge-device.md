@@ -158,9 +158,9 @@ Responsibilities:
 - Report the currently actuated traffic light phase (from LoRa) or caution state
 - Send heartbeat updates (process uptime and timestamp)
 - Maintain the retained `status` topic (`online: true` on connect, `online: false` on graceful shutdown) and register a Last Will & Testament so the broker reports ungraceful disconnects
-- Submit per-vehicle detections via `POST /api/devices/{id}/detections` (one multipart request per new ByteTrack ID: `trackId`, `class`, `deviceTimestamp`, required `image` full annotated frame; bounded queue, hold/retry offline).
+- Submit per-vehicle detections via `POST /api/devices/{id}/detections` (one multipart request per new ByteTrack ID: `trackId`, `class`, `deviceTimestamp`, optional `image` full annotated frame — the edge always includes one; bounded queue, hold/retry offline).
 
-> Dynamic queue gate triggers off `POST /api/devices/{id}/detections` (new-doc only), not telemetry. Dedup is server-side via doc-ID existence + RTDB `has_queued_schedule` — the edge keeps uploading normally and never tracks queue state itself.
+> Dynamic queue gate triggers off `POST /api/devices/{id}/detections` (new-doc only), not telemetry. Dedup is server-side via doc-ID existence + RTDB `has_queued_schedule`, and the gate also honors the group's `enqueueEdgeDetections` switch; an admin-only `forceEnqueue` request can override both. The edge keeps uploading normally and never tracks queue or group settings itself.
 
 Example telemetry:
 

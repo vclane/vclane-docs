@@ -1,6 +1,6 @@
 # Flutter Mobile Application
 
-The VCLane Flutter mobile app provides the user interface for monitoring and controlling traffic infrastructure. It enables operators to view live camera streams, monitor intersection status, manage edge devices, trigger signal overrides, and coordinate traffic control across multiple intersections.
+The VCLane Flutter mobile app provides the user interface for monitoring and controlling traffic infrastructure. It enables operators to view live camera streams, monitor intersection status, manage edge devices, trigger signal overrides, and coordinate traffic control across multiple intersections. Administrators additionally get a role-gated tools screen for detection and override testing.
 
 ## Architecture
 
@@ -50,6 +50,7 @@ lib/
 │
 ├── presentation/               # UI layer
 │   ├── auth/                   # Login screen
+│   ├── admin/                  # Admin tools screen (role-gated)
 │   ├── dashboard/              # Dashboard screen
 │   ├── devices/                # Device detail screen
 │   ├── profile/                # Profile screens
@@ -88,8 +89,38 @@ lib/
 | LiveStreamScreen   | `/devices/:id/stream` | Full-screen RTSP video playback                              |
 | ProfileScreen      | `/profile`            | User profile, preferences, app info, sign out                |
 | EditProfileScreen  | `/profile/edit`       | Edit display name, photo, address, phone                     |
+| AdminToolsScreen   | `/admin/tools`        | Admin-only detection test + group signal override            |
 
 Shared widgets include `StatusBadge`, `LoadingIndicator`, `ErrorDisplay`, `EmptyState`, and `ContextExtensions` for theme/media query access.
+
+## Admin Tools
+
+A single admin-only screen at `/admin/tools` (`AdminToolsScreen`) provides operational test controls. It is visible in the profile menu and routable only when `user.role == 'admin'`; the router redirects every other authenticated role to `/dashboard`. The backend independently enforces the role for `forceEnqueue`, so hiding the UI is not the security boundary.
+
+### Detection Test
+
+| Field | Behavior |
+| ----- | -------- |
+| Device | Dropdown of devices (Firestore stream); the device determines `groupId` |
+| Detected class | YOLO label suggestions plus free text |
+| Track ID | Generated per send (`admin-{epochMs}`) so each request creates a new doc |
+| Device timestamp | Current time (ISO-8601 UTC) |
+| Image | Not sent (`null`) — the endpoint accepts an omitted image |
+| Force enqueue | Toggle, default off; sent as multipart `forceEnqueue=true` |
+
+The tool posts `multipart/form-data` to `/api/devices/{id}/detections` with `trackId`, `class`, `deviceTimestamp`, and optionally `forceEnqueue`. It then reads the deterministic detection doc to display `enqueued`, `forceEnqueueRequested`, and the group's `enqueueEdgeDetections` snapshot. Repeated sends with Force enqueue on deliberately create duplicate FIFO entries; reusing a track ID/timestamp returns `deduped: true` and does not re-run the gate.
+
+### Override Signal
+
+| Field | Behavior |
+| ----- | -------- |
+| Group | Dropdown of groups; shows `schedulingMode` and controller availability |
+| Phases | One row per `group.deviceIds`, prefilled `RED`; pick any device for `GREEN` |
+| Duration | Seconds, default 30; `0` = indefinite; negative rejected by the form |
+| Apply | `POST /api/groups/{id}/commands` with `signal_override` |
+| Cancel | Same endpoint with `cancel_override` |
+
+The app sends a full phase map for every device in the group so no device falls to caution/RED from omission. The backend returns `202 Accepted` and the controller applies the override asynchronously, so the UI reports "Accepted", not "Applied". A group without a bound controller returns `409`. `YELLOW` is not offered because the 2-channel relay hardware actuates it as RED.
 
 ## Data Flow
 
@@ -102,15 +133,16 @@ Dio HTTP (backend API) ──► ApiDataSource ──► Repository ──► Fu
 ```
 
 - **Real-time data** (devices, groups, users, telemetry) flows through `StreamProvider` from Firestore/RTDB → widgets update automatically
-- **One-shot requests** (stream URLs) use `FutureProvider.family` via the Dio-based API client
+- **One-shot requests** (stream URLs, admin detection tests, group commands) use `FutureProvider.family`/controller calls via the Dio-based API client
 - **Derived state** (grouped device lists, effective readings with overrides) uses plain `Provider<T>`
 
 ## Routing & Auth Guard
 
-The app uses go_router with 6 routes and an auth redirect guard:
+The app uses go_router with 7 routes and an auth redirect guard:
 
 - Unauthenticated users are redirected to `/login` from any protected route
 - Authenticated users on `/login` are redirected to `/dashboard`
+- `/admin/*` routes additionally require `user.role == 'admin'`; other authenticated roles are redirected to `/dashboard`
 - All non-dashboard routes push full-screen using a root navigator key
 
 ```text
@@ -134,12 +166,12 @@ No `autoDispose` is used — all providers are global singletons for the app lif
 
 | Entity           | Key Fields                                                                    |
 | ---------------- | ----------------------------------------------------------------------------- |
-| `User`           | id, email, displayName, role ('operator')                                     |
+| `User`           | id, email, displayName, role (`admin` \| `operator` \| `viewer`, default `operator`) |
 | `Device`         | id, name, location, status (online/offline/warning), firmwareVersion, rtspUrl |
-| `Group`          | id, name, description, location                                               |
+| `Group`          | id, name, description, location, `enqueueEdgeDetections`                      |
 | `Telemetry`      | currentTrafficLightSignal, emergencyVehicleDetected, emergencyClass, emergencyConfidence, timestamp (no counts — history via `Detection`) |
 | `SignalOverride` | deviceId, targetSignal, requestedAt                                           |
-| `Detection`      | deviceId, groupId, timestamp (server), deviceTimestamp, trackId, class (any YOLO label), imageUrl (required) |
+| `Detection`      | deviceId, groupId, timestamp (server), deviceTimestamp, trackId, class (any YOLO label), imageUrl (`null` when no image), enqueued |
 
 > **Note:** Online/offline state and last-seen timestamps are tracked in the Realtime Database at `/telemetry/{deviceId}`, not in Firestore. The `online` field is set to `true` on every heartbeat, telemetry, or retained `status` online message, and to `false` via the retained device `status` topic (graceful shutdown or broker-published LWT). There is no backend timeout checker. This avoids excessive Firestore writes from frequent updates.
 
@@ -156,7 +188,7 @@ No `autoDispose` is used — all providers are global singletons for the app lif
 
 ## Implementation Notes
 
-- **Signal overrides** use an in-memory mock map. TODO: replace with backend API call when the endpoint is available.
+- **Signal overrides** are executed through the backend: device-detail overrides use `POST /api/devices/{id}/signal`, and the admin tool uses `POST /api/groups/{id}/commands`. The former in-memory mock map is no longer used.
 - **Video playback** with `media_kit` is stubbed. The `VideoPlayerWidget` shows a placeholder with the RTSP URL and a no-op connect button. Full integration is pending.
 - **Use cases** exist in the domain layer (`LoginUseCase`, `GetDevicesUseCase`, etc.) but are not wired into providers — providers call repositories directly. This is a transitional pattern.
 - **Charts** (`fl_chart`) is a dependency but no chart widgets have been implemented yet.

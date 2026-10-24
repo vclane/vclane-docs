@@ -47,7 +47,7 @@ traffic/
 
 > Queue completion uses a dedicated `traffic/group/{groupId}/queue-done` topic; `enqueue` continues to reuse `traffic/group/{groupId}/commands` (see below).
 
-> Per-vehicle detections are **not** sent over MQTT — they go via `POST /api/devices/{id}/detections` (see Backend API). Telemetry is the lean signal + emergency snapshot only; the dynamic queue gate triggers off the REST endpoint.
+> Per-vehicle detections are **not** sent over MQTT — they go via `POST /api/devices/{id}/detections` (see Backend API). Telemetry is the lean signal + emergency snapshot only; the dynamic queue gate triggers off the REST endpoint and honors the group's `enqueueEdgeDetections` switch (an admin `forceEnqueue` overrides it).
 
 ## Technology Stack
 
@@ -84,18 +84,22 @@ traffic/
 { "command": "cancel_override", "payload": {} }
 ```
 
-`durationSeconds <= 0` is indefinite. While an override is active the controller pauses the schedule turn-loop and uses the override phases in its place; when the override ends (expiry or cancel) it resumes the same turn it paused on but restarts that turn's full duration from the beginning — remaining time is not preserved.
+`durationSeconds` `0` is indefinite, a positive value is a fixed duration, and a negative value causes the controller to reject the command. While an override is active the controller pauses the schedule turn-loop (or dynamic queue) and uses the override phases in its place; when the override ends (expiry or cancel) it resumes the same turn/phase but restarts its full duration from the beginning — remaining time is not preserved.
+
+Group commands are fire-and-forget: the backend does not validate `command`/`payload`, accepts any authenticated user, and writes no audit record. Only the device-level `POST /api/devices/{id}/signal` path writes `signalOverrides`.
 
 **Schedule Sync on Connect** — On connection, the ESP-32 publishes an empty message to `traffic/group/{groupId}/schedule-request`. The backend responds on `traffic/group/{groupId}/schedule` with the stored schedule, keeping the controller's cached copy (and offline NVS fallback) in sync without periodic polling.
 
 **Dynamic Queue Scheduling** — Applies when the group's `schedulingMode` is `"dynamic"`:
 
-- **Detection (Edge → Backend):** `POST /api/devices/{deviceId}/detections` — one multipart request per new ByteTrack ID (first sighting, any YOLO label) with the full annotated frame. New docs only (not `deduped:true`) with vehicle-allowlist + staleness guard run the queue gate.
+- **Detection (Edge → Backend):** `POST /api/devices/{deviceId}/detections` — one multipart request per new ByteTrack ID (first sighting, any YOLO label) with the full annotated frame (optional; `imageUrl` is `null` when omitted). New docs only (not `deduped:true`) with vehicle-allowlist + staleness guard run the queue gate, unless the group has `enqueueEdgeDetections: false` or an admin sends `forceEnqueue: true`.
 - **Enqueue (Backend → Controller):** Reuses `traffic/group/{groupId}/commands` with the standard envelope:
 
 ```json
 { "command": "enqueue", "payload": { "deviceId": "intersection-01" } }
 ```
+
+The controller appends one FIFO entry per command and does not dedupe. Duplicates and the currently-GREEN device are executed in order (`cam1 | cam1 | cam2` → all three), subject only to the 16-entry capacity.
 
 - **Queue completion (Controller → Backend):** Publishes to `traffic/group/{groupId}/queue-done`:
 
@@ -112,7 +116,7 @@ traffic/
 }
 ```
 
-`queueDoneDeviceId` tells the backend to clear `has_queued_schedule` for that device in RTDB. `queueDepth` is the remaining FIFO depth after completion. When the queue is empty the controller broadcasts all-RED.
+`queueDoneDeviceId` tells the backend to clear `has_queued_schedule` for that device in RTDB. `queueDepth` is the remaining FIFO depth after completion, counting pending entries plus the one currently being served (duplicates included). When the queue is empty the controller broadcasts all-RED. Duplicate entries produce duplicate `queue-done` notices, and clearing the per-device `has_queued_schedule` flag more than once is harmless.
 
 **Device Monitoring (Retained Status + LWT)** — Every edge device publishes its connection state to `traffic/device/{deviceId}/status` with **QoS 1 and the retain flag set**:
 

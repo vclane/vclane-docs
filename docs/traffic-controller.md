@@ -32,7 +32,7 @@ Its primary purpose is to ensure that coordinated traffic light signaling remain
 
 ## Hardware Wiring
 
-The ESP-32 Traffic Controller connects three peripherals: the **LoRa transmitter** (broadcasts phase sync to the group's edge devices), the **DS3231 RTC** (battery-backed time source that keeps the schedule running through outages and reboots), and **WiFi / Ethernet** (backend connectivity). Schedules, overrides, and the LoRa `seq` counter are persisted in the ESP-32's on-chip **NVS**.
+The ESP-32 Traffic Controller connects three peripherals: the **LoRa transmitter** (broadcasts phase sync to the group's edge devices), the **DS3231 RTC** (battery-backed time source that keeps the schedule running through outages and reboots), and **WiFi / Ethernet** (backend connectivity). The schedule and the LoRa `seq` counter are persisted in the ESP-32's on-chip **NVS**; active signal overrides are held in RAM only and are lost on reboot.
 
 ```mermaid
 graph TD
@@ -123,6 +123,8 @@ MQTT uses the identical JSON frame as LoRa (same `seq` counter, `ov` flag, 1/sec
 | `ttl` | Integer | Seconds until the next phase change: time remaining in the current schedule turn, or remaining override time while an override is active. `0` means indefinite (e.g. an open-ended override). |
 | `ov` | Boolean | `true` while an override is active (controller sets `ov = override.active()`), `false` otherwise. Defaults to `false` for backward compatibility. Edge uses it to select relay blink count (5 vs 3). |
 
+> While an override is active, `p` contains only the device IDs listed in the override command. An edge device absent from `p` enters caution/solid RED on its next evaluation. Send a full group map (every `deviceIds` entry) when a deterministic phase set is required.
+
 ## Offline Resilience Flow
 
 The ESP-32 controller manages transition states autonomously depending on internet availability:
@@ -159,8 +161,8 @@ stateDiagram-v2
 ### Transition & Fallback Details
 
 1.  **Time Synchronization:** While online, the ESP-32 regularly syncs its internal clock with NTP servers and updates the hardware DS3231 RTC. When offline, it relies entirely on the DS3231 RTC.
-2.  **Schedule Caching:** Schedule configs (turns loop, `schedulingMode`, `dynamicConfig`) and the LoRa `seq` counter are saved in the ESP-32's Non-Volatile Storage (NVS). When connection is lost, the controller falls back to the cached **fixed turns loop** via RTC — even if the group was in dynamic mode, since server-mediated queueing is unavailable offline. Queued entries are discarded on fallback.
-3.  **Connection Recovery:** The ESP-32 executes connection retry attempts in a background thread, ensuring that failure to connect to WiFi/MQTT does not block the primary LoRa broadcasting task. On reconnect it resyncs the schedule, clears the queue, and resumes the configured online mode (all-RED idle if dynamic and empty).
+2.  **Schedule Caching:** Schedule configs (turns loop, `schedulingMode`, `dynamicConfig`) and the LoRa `seq` counter are saved in the ESP-32's Non-Volatile Storage (NVS). When connection is lost, the controller falls back to the cached **fixed turns loop** via RTC — even if the group was in dynamic mode, since server-mediated queueing is unavailable offline. Queued entries are discarded on fallback. An **active signal override is not cleared** by the fallback: it continues to drive the phases from RAM until it expires or is cancelled, after which the cached fixed loop takes over. Overrides themselves are not persisted, so a reboot loses them.
+3.  **Connection Recovery:** The ESP-32 executes connection retry attempts in a background thread, ensuring that failure to connect to WiFi/MQTT does not block the primary LoRa broadcasting task. On reconnect it resyncs the schedule, clears the queue, and resumes the configured online mode (all-RED idle if dynamic and empty). A still-active override persists across reconnect until expiry/cancel.
 
 ### Schedule Execution Model
 
@@ -169,10 +171,10 @@ stateDiagram-v2
 **Dynamic mode (`schedulingMode: "dynamic"`):** Queue-based on-demand scheduling using `dynamicConfig {greenSec, allRedSec}` (2-channel GREEN/RED relays — no YELLOW phase):
 
 1.  **Idle:** Broadcast all-RED to every device in the group (1-second heartbeat unchanged).
-2.  **Enqueue:** On `{"command": "enqueue", "payload": {"deviceId"}}` via `traffic/group/{groupId}/commands`, push `deviceId` to the in-RAM FIFO queue (backed to NVS) if it is not already queued and not currently GREEN. Duplicates are dropped.
+2.  **Enqueue:** On `{"command": "enqueue", "payload": {"deviceId"}}` via `traffic/group/{groupId}/commands`, append `deviceId` to the in-RAM FIFO queue (backed to NVS). Every command appends one entry — duplicates and the currently-GREEN device are allowed, so a queue of `cam1 | cam1 | cam2` serves all three in order. Only an empty `deviceId` or a full queue (16 entries) is rejected.
 3.  **Serve (FIFO):** Pop the head → LoRa broadcast GREEN for that device + RED for all others for `greenSec` → all-RED clearance for `allRedSec` (burst 3 packets on each phase change, same `seq` semantics as the fixed loop).
 4.  **Complete:** Publish queue completion to `traffic/group/{groupId}/queue-done` with `queueDoneDeviceId` + `queueDepth` so the backend clears `has_queued_schedule` in RTDB. Serve the next head, or return to all-RED idle when empty.
-5.  **Detection:** one `POST /api/devices/{id}/detections` per new tracked vehicle (gated server-side by allowlist + staleness + RED + not-already-queued).
+5.  **Detection:** one `POST /api/devices/{id}/detections` per new tracked vehicle (gated server-side by the group's `enqueueEdgeDetections` switch, allowlist, staleness, RED/CAUTION, and not-already-queued). An admin `forceEnqueue` request skips the gate and the group switch.
 6.  **Overrides win:** A manual `signal_override` / `cancel_override` preempts the queue per the envelope below; the queue resumes after override expiry/cancel.
 
 ### Dynamic Queueing Flow
@@ -187,7 +189,7 @@ flowchart TB
     G4{"6. RED +<br/>not already queued?"}
     DROP["Store only<br/>no queue"]
     ENQ["7. Enqueue<br/>commands enqueue(deviceId)<br/>RTDB has_queued=true"]
-    PUSH["8. Controller FIFO<br/>push (dup-suppressed)"]
+    PUSH["8. Controller FIFO<br/>append (duplicates allowed)"]
     GREEN["9. Serve head<br/>GREEN greenSec<br/>LoRa broadcast"]
     CLEAR["10. Clearance<br/>all-RED allRedSec"]
     QDONE["11. queue-done<br/>queueDoneDeviceId + depth"]
@@ -204,6 +206,8 @@ flowchart TB
     G4 -- no: GREEN or queued --> DROP
     ENQ --> PUSH --> GREEN --> CLEAR --> QDONE --> CLEARED --> IDLE1
 ```
+
+> This flowchart shows the normal edge path. An admin request with `forceEnqueue: true` still requires the group to be in `dynamic` mode (step 3), but skips the group's `enqueueEdgeDetections` switch and steps 4-6 (class allowlist, staleness, RED/already-queued), going straight to `enqueue`. The controller-side FIFO append (step 8) never dedupes.
 
 ```mermaid
 sequenceDiagram
@@ -232,13 +236,31 @@ sequenceDiagram
     C->>A: LoRa all-RED idle
 ```
 
+### Signal Override Semantics
+
+Reference behavior of the current controller firmware:
+
+1. **Duration:** `durationSeconds` `0` = indefinite, `> 0` = seconds, `< 0` = command rejected (no override applied). The `ttl` field is `0` for an indefinite override.
+2. **Scope:** while active, the override phase map replaces both the fixed turn output and the dynamic queue output. Device IDs **omitted** from `phases` are not included in the broadcast, so those edge devices enter caution/solid RED on their next phase evaluation. `POST /api/devices/{id}/signal` fills the rest of the group with the inverse signal, but a raw group command (including the edge's emergency `{deviceId: GREEN}` request) may be partial.
+3. **Invalid payloads:** empty `phases`, an unknown phase value, or a missing `payload` cause the controller to drop the whole command silently. There is no acknowledgement.
+4. **Resume:** after expiry or `cancel_override`, the fixed scheduler resumes the same turn and the queue executor resumes the interrupted GREEN/clearance phase; both restart the full duration (remaining time is not preserved).
+5. **Persistence:** overrides are RAM-only. They are lost on controller reboot, but survive MQTT loss and reconnect until they expire or are cancelled. The queue, by contrast, is discarded on offline fallback and reconnect.
+6. **Backend:** group commands are fire-and-forget — the backend publishes and returns `202`, does not validate `command`/`payload`, does not write a `signalOverrides` document, and does not restrict which authenticated role may send them.
+
+### FIFO Queue Semantics
+
+1. `enqueue(deviceId)` appends one entry unconditionally; only an empty `deviceId` and a full queue (`kMaxDepth = 16`) are rejected.
+2. Duplicates and the currently-served device are accepted: `cam1 | cam1 | cam2` serves `cam1 → cam1 → cam2`, each as GREEN(`greenSec`) → all-RED(`allRedSec`).
+3. Every completed serve publishes `traffic/group/{groupId}/queue-done` with `queueDoneDeviceId` and `queueDepth` (pending + current), so duplicate entries produce duplicate completion notices. The backend's `has_queued_schedule` clear is idempotent, but it is a per-device boolean rather than a per-entry counter.
+4. `enqueue` is ignored while offline or in `fixed` mode. The queue is discarded on offline fallback, reconnect, and schedule reload.
+
 ## Implementation Notes
 
 Reference implementation decisions (see changelog 2.1.1):
 
 - **MQTT version:** The controller connects with **MQTT 3.1.1** over TLS (PubSubClient). The broker is v5-capable; no v5-only features are used.
-- **Group commands** (`traffic/group/{groupId}/commands`) use the envelope `{"command": "signal_override", "payload": {"phases": {...}, "durationSeconds": N}}` or `{"command": "cancel_override", "payload": {}}`. `durationSeconds <= 0` is indefinite. An active override pauses the turn-loop and uses the override phases in its place; on expiry/cancel it resumes the same turn it paused on but restarts that turn's full duration from the beginning — remaining time is not preserved.
-- **Queue commands (dynamic mode):** `{"command": "enqueue", "payload": {"deviceId": "..."}}` pushes one FIFO entry (dup-suppressed). After each serve the controller publishes `traffic/group/{groupId}/queue-done` with `queueDoneDeviceId` + `queueDepth` for the backend to clear `has_queued_schedule`.
+- **Group commands** (`traffic/group/{groupId}/commands`) use the envelope `{"command": "signal_override", "payload": {"phases": {...}, "durationSeconds": N}}` or `{"command": "cancel_override", "payload": {}}`. `durationSeconds` `0` is indefinite, a positive value is a fixed duration, and a negative value rejects the whole command. An active override pauses the turn-loop (or dynamic queue) and uses the override phases in its place; on expiry/cancel it resumes the same turn/phase but restarts its full duration from the beginning — remaining time is not preserved.
+- **Queue commands (dynamic mode):** `{"command": "enqueue", "payload": {"deviceId": "..."}}` appends one FIFO entry; duplicates and the current GREEN device are **not** suppressed. After each serve the controller publishes `traffic/group/{groupId}/queue-done` with `queueDoneDeviceId` + `queueDepth` (pending + current) for the backend to clear `has_queued_schedule`.
 - **No telemetry from the controller:** telemetry is published exclusively by edge devices (`traffic/device/{deviceId}/telemetry`). The controller's only group-topic data is queue completion on `traffic/group/{groupId}/queue-done`. Heartbeat (`traffic/group/{groupId}/heartbeat`) is published every **30 s** (groupId, uptime, timestamp).
 - **LoRa burst:** a phase change sends a **burst of 3 packets** retransmitting the *same logical packet* (identical `seq`); the regular heartbeat broadcast is 1 packet per second. Receivers reject duplicates/stale packets by `seq`. `seq` is persisted to NVS on each phase change so deduplication survives a controller reboot.
 - **Override flag (`ov`):** every phase frame sets `ov = override.active()` (`true` during manual or edge-initiated emergency overrides, `false` otherwise; defaults to `false`). The edge maps `ov: true` → 5 relay blinks, `ov: false` → 3 blinks before latching solid.

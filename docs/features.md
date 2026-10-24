@@ -29,6 +29,8 @@
 - Centralized monitoring
 - Multi-device coordination
 - Per-group scheduling mode: fixed turns loop or dynamic on-demand queue (all-RED idle, GREEN on vehicle detection)
+- Per-group enqueue switch (`enqueueEdgeDetections`) with audit-only detection storage when disabled
+- Admin force-enqueue detection testing and admin-only group override tools
 
 ## Secure IoT Communication
 

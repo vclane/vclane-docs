@@ -4,6 +4,24 @@ This changelog tracks system-wide architectural modifications. Submodule develop
 
 ---
 
+## [2.12.0] — 2026-10-24
+
+### Admin Force-Enqueue, Group Enqueue Switch, Non-Deduped FIFO, Optional Detection Image
+
+#### Summary of Major Changes
+1.  **Group enqueue switch:** `groups/{groupId}.enqueueEdgeDetections` (`bool`, default `true`; missing on legacy docs = `true`). When `false`, detections are still stored but the queue gate never publishes `enqueue`. Signal overrides are unaffected. Backend-only; it is not part of the MQTT schedule payload.
+2.  **Admin force-enqueue:** `POST /api/devices/{id}/detections` accepts optional multipart `forceEnqueue` (default `false`). Requires `users/{uid}.role == "admin"` (403 otherwise, nothing written). Skips the allowlist, staleness, RED/CAUTION, `has_queued_schedule`, and `enqueueEdgeDetections` checks; still requires a group in `schedulingMode: "dynamic"`.
+3.  **Controller FIFO no longer dedupes:** every `enqueue` appends one entry, including duplicates and the currently-GREEN device. A queue of `cam1 | cam1 | cam2` serves all three in order. Only empty IDs and a full queue (16 entries) are rejected.
+4.  **Optional image:** `image` is optional; when absent no Storage upload occurs and `imageUrl` is `null`.
+5.  **Detection audit fields:** `forceEnqueueRequested`, `enqueueEdgeDetections` (group snapshot), `enqueued`.
+6.  **Admin Tools (client):** `/admin/tools`, role-gated; detection test (no image, optional force) plus group override / cancel with a full per-device phase map.
+7.  **Gate corrections:** staleness is 180 s (not ~30 s); the gate accepts `RED` or `CAUTION`.
+8.  **Group override spec corrections:** `durationSeconds` `0` = indefinite, negative rejected; overrides are RAM-only and survive MQTT loss until expiry; unlisted devices fall to caution/RED; the fixed turn and queue phase restart in full after an override; group commands remain fire-and-forget with no audit record.
+9.  **Known caveat:** RTDB `has_queued_schedule` remains a per-device boolean; with repeated forced entries the first completion clears it while duplicates may still be pending.
+10. **Docs-only:** other components implement from this entry.
+
+---
+
 ## [2.11.0] — 2026-10-24
 
 ### Edge Online Status via Retained LWT (Timeout Checker Removed)
