@@ -181,6 +181,8 @@ When an emergency vehicle (`ambulance`, `fire truck`, `police car` by default) i
 
 When YOLO reports an `emergency_classes` label (`ambulance`, `fire truck`, `police car` by default) above `emergency_confidence` for `emergency_min_frames` consecutive sightings, the edge sets the telemetry emergency flag and sends one `signal_override` request per distinct vehicle (ByteTrack ID) via the existing `POST /api/groups/{id}/commands` endpoint (`durationSeconds: 60` by default, no cancel — the override expires naturally). Auth reuses `POST /api/auth/login` with `admin_email` / `admin_password` (or `VCLANE_ADMIN_EMAIL` / `VCLANE_ADMIN_PASSWORD`). Requires `api_url` + `group_id` + admin credentials; without them the device sets the telemetry flag only. A global `emergency_cooldown_s` (default 60 s) suppresses redundant POSTs while an override is active.
 
+> Backend 2.13.0 also reacts to emergency-class entries in `POST /api/devices/{id}/detections` by publishing the same 60 s group override (or a device-level fallback). The edge-initiated request remains supported and its cooldown still applies; if both paths fire, the controller simply receives a duplicate identical override.
+
 ## Device Monitoring
 
 Each edge device periodically reports its status to the backend over MQTT:

@@ -228,7 +228,7 @@ The backend also writes a Firestore document to `signalOverrides/{id}` with `{de
 
 `durationSeconds` `0` is indefinite; a positive value is a fixed duration; a negative value causes the controller to reject the whole command. The ESP-32 pauses its schedule turn-loop (or the dynamic queue) while an override is active and uses the override phases in its place. Device IDs omitted from `phases` are not broadcast, so those edge devices enter caution/solid RED; the device-level `POST /api/devices/{id}/signal` path fills the rest of the group with the inverse signal. On expiry/cancel the controller resumes the same turn (or the interrupted queue phase) but restarts its full duration — remaining time is not preserved.
 
-Group commands are fire-and-forget: any authenticated user may send them, the backend returns `202 {"status": "sent", "groupId": ...}` without validating `command`/`payload`, and no `signalOverrides` audit document is written (only the device-level `/signal` endpoint writes one).
+Group commands are fire-and-forget: any authenticated user may send them, the backend returns `202 {"status": "sent", "groupId": ...}` without validating `command`/`payload`, and no `signalOverrides` audit document is written (only the device-level `/signal` endpoint writes one). Detection-triggered emergency overrides are recorded only as `signalOverrideSent` on the detection doc.
 
 **Queue enqueue (dynamic mode)** — published automatically by the queue gate to `traffic/group/{groupId}/commands`:
 
@@ -236,7 +236,7 @@ Group commands are fire-and-forget: any authenticated user may send them, the ba
 { "command": "enqueue", "payload": { "deviceId": "intersection-01" } }
 ```
 
-The controller appends exactly one FIFO entry per `enqueue` and does **not** dedupe: duplicates and the currently-GREEN device are accepted, so a queue of `cam1 | cam1 | cam2` serves all three in order. Only an empty `deviceId` or a full queue (16 entries) is rejected. Normal edge detections are deduped upstream via `has_queued_schedule`; an admin `forceEnqueue` bypasses that dedup.
+The controller appends exactly one FIFO entry per `enqueue` and does **not** dedupe: duplicates and the currently-GREEN device are accepted, so a queue of `cam1 | cam1 | cam2` serves all three in order. Only an empty `deviceId` or a full queue (16 entries) is rejected. Normal edge detections are deduped upstream via `has_queued_schedule`; an admin `forceEnqueue` bypasses that dedup. Emergency-class detections never enter the queue — the backend publishes `signal_override` instead (detecting device `GREEN`, siblings `RED`, 60 s) with a device-level `targetSignal: "GREEN"` fallback when no controller is bound.
 
 **Group sync** (published on `POST /api/groups/{id}/sync`):
 
@@ -258,6 +258,10 @@ No new topics — the gate triggers off `POST /api/devices/{id}/detections` (new
 
 ```
 group = Firestore lookup via devices/{deviceId}.groupId (already resolved)
+if class in emergency allowlist:
+    if now - deviceTimestamp > 180s: return     # stale detection → store only
+    publish signal_override                     # GREEN here, RED siblings, 60 s
+    return
 if group is None or group.schedulingMode != "dynamic": return  # store only
 if request.forceEnqueue:
     # wins over enqueueEdgeDetections and skips every check below
@@ -271,12 +275,21 @@ else:
     if has_queued_schedule == true: return      # dedup a pending/ongoing serve
     enqueue
 
+override (emergency):
+    if group has controllerId:
+        publish {"command": "signal_override", "payload": {"phases": {deviceId: "GREEN", <siblings>: "RED"}, "durationSeconds": 60}}
+            to traffic/group/{groupId}/commands
+    else:
+        publish {"command": "signal_override", "payload": {"targetSignal": "GREEN", "durationSeconds": 60}}
+            to traffic/device/{deviceId}/commands
+    no RTDB write
+
 enqueue:
     publish {"command": "enqueue", "payload": {"deviceId"}} to traffic/group/{groupId}/commands
     RTDB update /telemetry/{deviceId}: {has_queued_schedule: true, queuedAt: now}
 ```
 
-A gate failure is logged and never changes the `201`; the detection's `enqueued` audit field records the outcome. `forceEnqueue` still requires `schedulingMode: "dynamic"` — against a `fixed` group it stores only, because the controller ignores `enqueue` outside dynamic mode.
+A gate failure is logged and never changes the `201`; the detection's `enqueued` / `signalOverrideSent` audit fields record the outcome. `forceEnqueue` still requires `schedulingMode: "dynamic"` — against a `fixed` group it stores only, because the controller ignores `enqueue` outside dynamic mode. Emergency overrides are mode-independent and still require a fresh `deviceTimestamp`.
 
 **On `traffic/group/{groupId}/queue-done` with `queueDoneDeviceId`:**
 

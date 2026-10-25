@@ -60,7 +60,7 @@ graph TB
 
 **Traffic Monitoring** — Receive real-time telemetry, monitor traffic conditions, store traffic information, generate traffic statistics, detect traffic events.
 
-**Traffic Control** — Send traffic signal commands, trigger manual overrides, manage intersection schedules (turns loop + per-group `schedulingMode: fixed | dynamic`), coordinate multiple intersections, process command responses. In `dynamic` mode the backend runs a queue gate on new `POST /api/devices/{id}/detections` docs (vehicle allowlist + staleness guard → `enqueue` when RED/CAUTION + not already queued) and clears RTDB `has_queued_schedule` on controller queue-completion. Each group has an `enqueueEdgeDetections` switch (default `true`); when `false`, detections are stored but never enqueued. An admin may send `forceEnqueue=true` to skip the gate and the group switch.
+**Traffic Control** — Send traffic signal commands, trigger manual overrides, manage intersection schedules (turns loop + per-group `schedulingMode: fixed | dynamic`), coordinate multiple intersections, process command responses. In `dynamic` mode the backend runs a queue gate on new `POST /api/devices/{id}/detections` docs (vehicle allowlist + staleness guard → `enqueue` when RED/CAUTION + not already queued) and clears RTDB `has_queued_schedule` on controller queue-completion. Each group has an `enqueueEdgeDetections` switch (default `true`); when `false`, detections are stored but never enqueued. An admin may send `forceEnqueue=true` to skip the gate and the group switch. Detections whose `class` is an emergency class skip the queue and publish a `signal_override` instead (detecting device `GREEN`, siblings `RED`, 60 s) in both scheduling modes.
 
 **Real-Time Synchronization** — MQTT command publishing, device heartbeat processing, WebSocket client updates, event notifications.
 
@@ -77,7 +77,7 @@ graph TB
 | `DELETE` | `/api/devices/{id}`          | JWT  | Delete device                                |
 | `POST`   | `/api/devices/{id}/commands` | JWT  | Send arbitrary command                       |
 | `POST`   | `/api/devices/{id}/signal`   | JWT  | Override traffic signal                      |
-| `POST`   | `/api/devices/{id}/detections` | JWT | Submit one per-vehicle detection (multipart `trackId`, `class`, `deviceTimestamp`, optional `image`, optional admin `forceEnqueue`) → optional Storage upload + Firestore `detections` write |
+| `POST`   | `/api/devices/{id}/detections` | JWT | Submit one per-vehicle detection (multipart `trackId`, `class`, `deviceTimestamp`, optional `image`, optional admin `forceEnqueue`) → optional Storage upload + Firestore `detections` write; emergency classes publish `signal_override` instead of enqueueing |
 | `GET`    | `/api/groups`                | JWT  | List all groups                              |
 | `POST`   | `/api/groups`                | JWT  | Create group                                 |
 | `GET`    | `/api/groups/{id}`           | JWT  | Get group details                            |
@@ -110,6 +110,10 @@ Content-Type: multipart/form-data
 
 **Authorization:** the session JWT carries only the user ID (`sub`), so the backend resolves `users/{uid}.role`. A request with `forceEnqueue=true` from a user whose role is not `admin` returns `403` before anything is written.
 
+**Vehicle allowlist:** only `bicycle`, `car`, `chariot`, `E-bike`, `motorcycle`, `tricycle`, and `truck` may trigger an enqueue (matched case-insensitively). Other YOLO labels are stored as history but never queued.
+
+**Emergency classes:** `emergency vehicle` (matched case-insensitively after trimming) does not run the queue gate. Instead the backend requests a `signal_override`: the detecting device goes `GREEN`, every sibling in its group goes `RED`, and the override lasts 60 s. This applies in both `fixed` and `dynamic` groups, ignores `enqueueEdgeDetections`, and never touches RTDB queue flags. When the device has no group, or the group has no bound controller, the override falls back to a device-level command with `targetSignal: "GREEN"`. The staleness guard still applies, so a detection older than 180 s never triggers an override. Emergency overrides are not written to `signalOverrides`; the detection doc records them via `signalOverrideSent`.
+
 Backend flow:
 
 1. Authenticate via operator JWT; reject `forceEnqueue` unless the user's role is `admin`.
@@ -117,14 +121,18 @@ Backend flow:
 3. Resolve `groupId` from `devices/{id}.groupId`.
 4. Compute doc ID `{deviceId}_{trackId}_{deviceTimestamp}`; if it exists, return `200` with `deduped: true` (no rewrite and no queue gate).
 5. When `image` is present, upload it to Storage (`detections/{deviceId}/{trackId}_{deviceTimestamp}.jpg`); otherwise leave `imageUrl` `null`.
-6. Write the `detections` doc with server `timestamp` plus the audit fields `forceEnqueueRequested`, `enqueueEdgeDetections`, and `enqueued: false`.
-7. Run the queue decision below, then update `enqueued`.
+6. Write the `detections` doc with server `timestamp` plus the audit fields `forceEnqueueRequested`, `enqueueEdgeDetections`, `enqueued: false`, and `signalOverrideSent: false`.
+7. Run the detection decision below (emergency override or queue gate), then update `enqueued` / `signalOverrideSent`.
 8. Return `201` with the doc ID.
 
-Queue decision (a gate failure is logged and never changes the `201`):
+Detection decision (a gate failure is logged and never changes the `201`):
 
 ```text
-if no group or group.schedulingMode != "dynamic":
+if class in emergency allowlist:
+    deviceTimestamp age <= 180 s
+    -> publish signal_override (device GREEN, siblings RED, 60 s)
+       group topic when a controller is bound, else device topic
+elif no group or group.schedulingMode != "dynamic":
     store only
 elif request.forceEnqueue:
     publish enqueue(deviceId)        # wins over enqueueEdgeDetections
@@ -139,9 +147,11 @@ else:
     -> publish enqueue + set RTDB flags
 ```
 
-`forceEnqueue` still requires a group in `dynamic` mode: against a `fixed` group the detection is stored only (`enqueued: false`), because the controller ignores `enqueue` outside dynamic mode. It does not bypass detection doc dedupe — reusing `trackId` and `deviceTimestamp` returns `200 deduped:true` and never runs the gate.
+Emergency classes bypass the enqueue path even when `forceEnqueue=true`: the admin flag still requires the `admin` role, but the result is a `signal_override`, not an `enqueue`.
 
-Detections bypass Mosquitto entirely and never touch RTDB themselves.
+`forceEnqueue` still requires a group in `dynamic` mode: against a `fixed` group a non-emergency detection is stored only (`enqueued: false`), because the controller ignores `enqueue` outside dynamic mode. It does not bypass detection doc dedupe — reusing `trackId` and `deviceTimestamp` returns `200 deduped:true` and never runs the decision.
+
+Detection requests arrive over REST; the backend's decision may publish `enqueue` or `signal_override` over MQTT. Detection docs never write RTDB themselves — the enqueue path sets `has_queued_schedule`, and emergency overrides leave RTDB untouched.
 
 > The gate dedups normal edge detections via RTDB `has_queued_schedule` (per device, cleared on controller `queue-done`). `forceEnqueue` bypasses that dedup intentionally and may create duplicate FIFO entries; the controller appends every `enqueue` it receives. See Server Integration.
 
@@ -179,4 +189,4 @@ Validation rules:
 
 Each group has a `schedulingMode` (`"fixed"` default | `"dynamic"`) stored on the group document alongside the turns-loop `schedule` and the `dynamicConfig {greenSec, allRedSec}` timings. The mode travels inside the `traffic/group/{groupId}/schedule` payload so the controller can switch executors without reflashing; offline it always falls back to the cached fixed turns loop.
 
-The group document also carries `enqueueEdgeDetections` (`bool`, default `true`). It is backend-only configuration for the queue gate: when `false`, new detections are still stored but never enqueued, and an admin `forceEnqueue` request is the only way to queue one. It is **not** part of the MQTT schedule payload, so the controller does not need to know it.
+The group document also carries `enqueueEdgeDetections` (`bool`, default `true`). It is backend-only configuration for the queue gate: when `false`, new detections are still stored but never enqueued, and an admin `forceEnqueue` request is the only way to queue one. Emergency-class detections are unaffected and publish a `signal_override` instead. It is **not** part of the MQTT schedule payload, so the controller does not need to know it.

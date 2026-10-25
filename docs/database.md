@@ -80,10 +80,11 @@ One document per detected vehicle, written by the backend when the edge posts to
 | `forceEnqueueRequested` | `bool` | Caller sent `forceEnqueue=true` (admin-only test path) |
 | `enqueueEdgeDetections` | `bool` | Snapshot of the group's queue switch at write time     |
 | `enqueued`        | `bool`      | Whether an `enqueue` was actually published (`false` = stored only) |
+| `signalOverrideSent` | `bool`   | Whether an emergency-class detection published a `signal_override` (`false` for non-emergency classes, stale detections, or publish failures) |
 
 > **Note:** `imageUrl` is nullable. Edge uploads normally include an image, but the admin detection tool sends none, so `imageUrl` is `null` and no Storage object is created. Mobile queries this collection directly (no REST read path). Required composite indexes: `(deviceId, timestamp DESC)`, `(groupId, timestamp DESC)`. Security rules: signed-in operators may read; writes are backend-only (`write: false`, Admin SDK bypasses rules).
 
-> **Note:** `forceEnqueueRequested`, `enqueueEdgeDetections`, and `enqueued` are the queue audit trail. They are written by the backend only. `enqueued: false` means the detection was stored without queueing — for example because the group is `fixed`, `enqueueEdgeDetections` is `false`, a gate check failed, or no enqueue was published.
+> **Note:** `forceEnqueueRequested`, `enqueueEdgeDetections`, `enqueued`, and `signalOverrideSent` are the detection audit trail. They are written by the backend only. `enqueued: false` means the detection was stored without queueing — for example because the group is `fixed`, `enqueueEdgeDetections` is `false`, a gate check failed, or no enqueue was published. `signalOverrideSent: true` means the class matched the emergency allowlist and the override publish was accepted; it does not create a `signalOverrides` document.
 
 ## Realtime Database (RTDB)
 
@@ -104,7 +105,7 @@ This path is updated on every heartbeat and telemetry message from the edge devi
 | `has_queued_schedule`  | `bool`          | Backend queue gate  | `True` — device has a pending/ongoing queued GREEN in dynamic mode; `False` — default/idle        |
 | `queuedAt`             | `int \| null`   | Backend queue gate  | Server Unix timestamp of the last `enqueue`, cleared (`null`) on `queue-done`                     |
 
-> **Note:** `has_queued_schedule` / `queuedAt` are only used when the device's group has `schedulingMode: "dynamic"`. They are written **only by the backend** (set on `enqueue`, cleared on controller `queue-done`); edge devices never write them. They provide dedup: while `has_queued_schedule` is `true`, further detections for that device do not trigger another enqueue. The gate does not set them when the group has `enqueueEdgeDetections: false` (unless an admin sends `forceEnqueue=true`). This flag is per device, not per queue entry: the controller may hold duplicate entries for one device, and the first `queue-done` clears the flag while another duplicate is still pending.
+> **Note:** `has_queued_schedule` / `queuedAt` are only used when the device's group has `schedulingMode: "dynamic"`. They are written **only by the backend** (set on `enqueue`, cleared on controller `queue-done`); edge devices never write them. They provide dedup: while `has_queued_schedule` is `true`, further detections for that device do not trigger another enqueue. The gate does not set them when the group has `enqueueEdgeDetections: false` (unless an admin sends `forceEnqueue=true`). Emergency-class detections publish a `signal_override` and never touch these fields. This flag is per device, not per queue entry: the controller may hold duplicate entries for one device, and the first `queue-done` clears the flag while another duplicate is still pending.
 
 > **Note:** `vehicleToday` has been **removed** from `/telemetry/{deviceId}` and must not be written. "Vehicles detected today" is derived by counting `detections` documents with `timestamp >= startOfDay` — see `detections/{detectionId}` above.
 

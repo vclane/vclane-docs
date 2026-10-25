@@ -4,6 +4,23 @@ This changelog tracks system-wide architectural modifications. Submodule develop
 
 ---
 
+## [2.13.0] — 2026-10-25
+
+### Emergency-Class Detections Request a Signal Override
+
+#### Summary of Major Changes
+1.  **Emergency allowlist:** `emergency vehicle` (matched case-insensitively after trimming) now short-circuits the detection gate.
+2.  **Vehicle allowlist narrowed:** only `bicycle`, `car`, `chariot`, `E-bike`, `motorcycle`, `tricycle`, and `truck` may enqueue. `ambulance`, `bus`, `fire truck`, `jeepney`, `police car`, and `van` no longer do; their detections are stored only (or override, if the class is an emergency class).
+3.  **Override instead of enqueue:** instead of running the dynamic queue, `POST /api/devices/{id}/detections` publishes `signal_override` on `traffic/group/{groupId}/commands` with the detecting device `GREEN`, group siblings `RED`, and `durationSeconds: 60`.
+4.  **Mode-independent:** emergency overrides fire in both `fixed` and `dynamic` groups, ignore `enqueueEdgeDetections`, the vehicle allowlist, the RED/CAUTION check, and `has_queued_schedule`. An admin `forceEnqueue=true` on an emergency class still yields an override, not an enqueue.
+5.  **Staleness retained:** a `deviceTimestamp` older than 180 s (or unparseable) never triggers an override.
+6.  **Fallback:** devices with no group, or groups without a bound `controllerId`, receive a device-level `traffic/device/{deviceId}/commands` override with `{"targetSignal": "GREEN", "durationSeconds": 60}`.
+7.  **Audit:** new `detections/{detectionId}.signalOverrideSent` (`bool`, default `false`). No `signalOverrides` document is created for detection-triggered overrides.
+8.  **Non-emergency unchanged:** existing queue-gate mechanics, `forceEnqueue`, and audit fields are untouched (aside from the narrowed allowlist above).
+9.  **Backend-only:** controller and edge firmware do not change; they already handle `signal_override`.
+
+---
+
 ## [2.12.1] — 2026-10-24
 
 ### Backend MQTT Client Reconnects After Disconnects

@@ -47,7 +47,7 @@ traffic/
 
 > Queue completion uses a dedicated `traffic/group/{groupId}/queue-done` topic; `enqueue` continues to reuse `traffic/group/{groupId}/commands` (see below).
 
-> Per-vehicle detections are **not** sent over MQTT — they go via `POST /api/devices/{id}/detections` (see Backend API). Telemetry is the lean signal + emergency snapshot only; the dynamic queue gate triggers off the REST endpoint and honors the group's `enqueueEdgeDetections` switch (an admin `forceEnqueue` overrides it).
+> Per-vehicle detections are **not** sent over MQTT — they go via `POST /api/devices/{id}/detections` (see Backend API). Telemetry is the lean signal + emergency snapshot only; the dynamic queue gate triggers off the REST endpoint and honors the group's `enqueueEdgeDetections` switch (an admin `forceEnqueue` overrides it). Emergency-class detections do not enqueue; the backend publishes a `signal_override` on their behalf instead.
 
 ## Technology Stack
 
@@ -86,13 +86,15 @@ traffic/
 
 `durationSeconds` `0` is indefinite, a positive value is a fixed duration, and a negative value causes the controller to reject the command. While an override is active the controller pauses the schedule turn-loop (or dynamic queue) and uses the override phases in its place; when the override ends (expiry or cancel) it resumes the same turn/phase but restarts its full duration from the beginning — remaining time is not preserved.
 
-Group commands are fire-and-forget: the backend does not validate `command`/`payload`, accepts any authenticated user, and writes no audit record. Only the device-level `POST /api/devices/{id}/signal` path writes `signalOverrides`.
+Emergency-class detections (`emergency vehicle`) also publish `signal_override` on this topic with `{deviceId: "GREEN"}` plus `RED` for group siblings and `durationSeconds: 60`. If the device has no group, or the group has no bound controller, the backend publishes the same override to `traffic/device/{deviceId}/commands` with `{"targetSignal": "GREEN", "durationSeconds": 60}`.
+
+Group commands are fire-and-forget: the backend does not validate `command`/`payload`, accepts any authenticated user, and writes no audit record. Only the device-level `POST /api/devices/{id}/signal` path writes `signalOverrides`; detection-triggered emergency overrides are recorded only as `signalOverrideSent` on the detection doc.
 
 **Schedule Sync on Connect** — On connection, the ESP-32 publishes an empty message to `traffic/group/{groupId}/schedule-request`. The backend responds on `traffic/group/{groupId}/schedule` with the stored schedule, keeping the controller's cached copy (and offline NVS fallback) in sync without periodic polling.
 
 **Dynamic Queue Scheduling** — Applies when the group's `schedulingMode` is `"dynamic"`:
 
-- **Detection (Edge → Backend):** `POST /api/devices/{deviceId}/detections` — one multipart request per new ByteTrack ID (first sighting, any YOLO label) with the full annotated frame (optional; `imageUrl` is `null` when omitted). New docs only (not `deduped:true`) with vehicle-allowlist + staleness guard run the queue gate, unless the group has `enqueueEdgeDetections: false` or an admin sends `forceEnqueue: true`.
+- **Detection (Edge → Backend):** `POST /api/devices/{deviceId}/detections` — one multipart request per new ByteTrack ID (first sighting, any YOLO label) with the full annotated frame (optional; `imageUrl` is `null` when omitted). New docs only (not `deduped:true`) with vehicle-allowlist + staleness guard run the queue gate, unless the group has `enqueueEdgeDetections: false` or an admin sends `forceEnqueue: true`. Emergency classes short-circuit the queue and publish `signal_override` instead (see above), in both scheduling modes.
 - **Enqueue (Backend → Controller):** Reuses `traffic/group/{groupId}/commands` with the standard envelope:
 
 ```json
