@@ -74,7 +74,7 @@ lib/
 | Real-Time Telemetry | Firebase Realtime Database |
 | File Storage        | Firebase Storage           |
 | HTTP Client         | Dio                        |
-| Video Playback      | media_kit (RTSP/WebRTC)    |
+| Video Playback      | `flutter_webrtc` (WHEP); `media_kit` RTSP fallback |
 | Charts              | fl_chart                   |
 | Image Picker        | image_picker               |
 | Fonts               | google_fonts (Inter)       |
@@ -86,12 +86,58 @@ lib/
 | LoginScreen        | `/login`              | Email/password sign-in with VCLane branding                  |
 | DashboardScreen    | `/dashboard`          | Device list grouped by status, quick stats, group breakdown  |
 | DeviceDetailScreen | `/devices/:id`        | Full device info, telemetry, stream preview, signal override |
-| LiveStreamScreen   | `/devices/:id/stream` | Full-screen RTSP video playback                              |
+| LiveStreamScreen   | `/devices/:id/stream` | Full-screen WHEP/WebRTC playback (RTSP fallback)             |
 | ProfileScreen      | `/profile`            | User profile, preferences, app info, sign out                |
 | EditProfileScreen  | `/profile/edit`       | Edit display name, photo, address, phone                     |
 | AdminToolsScreen   | `/admin/tools`        | Admin-only detection test + group signal override            |
 
 Shared widgets include `StatusBadge`, `LoadingIndicator`, `ErrorDisplay`, `EmptyState`, and `ContextExtensions` for theme/media query access.
+
+## Live Video Playback
+
+The live stream screen uses WebRTC/WHEP as the primary path, with RTSP retained as a fallback.
+
+### Flow
+
+1. The operator opens `/devices/:id/stream`.
+2. The app creates an `RTCPeerConnection` with `flutter_webrtc`.
+3. It adds a receive-only video transceiver and creates an SDP offer.
+4. It posts the offer to `POST /api/devices/{id}/whep` with the session JWT and `Content-Type: application/sdp`.
+5. The backend registers the device with go2rtc, pulls the RTSP feed from MediaMTX on demand, and returns the SDP answer.
+6. The app applies the answer, waits for `onTrack`, and renders the stream in `RTCVideoRenderer`.
+
+```dart
+final pc = await createPeerConnection({
+  'iceServers': [
+    {'urls': 'stun:stun.cloudflare.com:3478'},
+  ],
+});
+
+final transceiver = await pc.addTransceiver(
+  kind: RTCRtpMediaType.RTCRtpMediaTypeVideo,
+  init: RTCRtpTransceiverInit(direction: TransceiverDirection.RecvOnly),
+);
+
+final offer = await pc.createOffer();
+await pc.setLocalDescription(offer);
+
+final answer = await api.postSdp('/api/devices/$deviceId/whep', offer.sdp!);
+await pc.setRemoteDescription(RTCSessionDescription(answer, 'answer'));
+
+pc.onTrack = (event) {
+  if (event.streams.isNotEmpty) {
+    renderer.srcObject = event.streams[0];
+  }
+};
+```
+
+### Notes
+
+- Media flows directly from go2rtc on `8555/udp` or `8555/tcp`; it never traverses Caddy or the backend.
+- The backend endpoint is JWT-gated, so no go2rtc credentials ship with the app.
+- The WHEP exchange is one-shot; if the connection drops, recreate the peer connection and repeat the flow.
+- H.264 is published by the edge, so no codec negotiation fallback is required. go2rtc also exposes MSE/HLS for web clients.
+- RTSP playback (`media_kit`) remains available for debugging and as a fallback when WebRTC/ICE is blocked.
 
 ## Admin Tools
 
@@ -133,7 +179,7 @@ Dio HTTP (backend API) ──► ApiDataSource ──► Repository ──► Fu
 ```
 
 - **Real-time data** (devices, groups, users, telemetry) flows through `StreamProvider` from Firestore/RTDB → widgets update automatically
-- **One-shot requests** (stream URLs, admin detection tests, group commands) use `FutureProvider.family`/controller calls via the Dio-based API client
+- **One-shot requests** (WHEP sessions, admin detection tests, group commands) use `FutureProvider.family`/controller calls via the Dio-based API client
 - **Derived state** (grouped device lists, effective readings with overrides) uses plain `Provider<T>`
 
 ## Routing & Auth Guard
@@ -157,7 +203,7 @@ All providers are handwritten (no code generation). Key patterns:
 | ----------------------- | ----------------------------------------------- |
 | `StreamProvider`        | Real-time device list, group list               |
 | `StreamProvider.family` | Single device by ID, telemetry by device        |
-| `FutureProvider.family` | Stream URL by device ID                         |
+| `FutureProvider.family` | WHEP session by device ID                        |
 | `Provider<T>` (derived) | Auth state, grouped devices, effective readings |
 
 No `autoDispose` is used — all providers are global singletons for the app lifetime.
@@ -189,7 +235,7 @@ No `autoDispose` is used — all providers are global singletons for the app lif
 ## Implementation Notes
 
 - **Signal overrides** are executed through the backend: device-detail overrides use `POST /api/devices/{id}/signal`, and the admin tool uses `POST /api/groups/{id}/commands`. The former in-memory mock map is no longer used.
-- **Video playback** with `media_kit` is stubbed. The `VideoPlayerWidget` shows a placeholder with the RTSP URL and a no-op connect button. Full integration is pending.
+- **Video playback** uses WHEP via `flutter_webrtc` (see [Live Video Playback](#live-video-playback)). `media_kit` RTSP remains as a fallback/debug path; `rtspUrl` stays on the `Device` entity for that purpose.
 - **Use cases** exist in the domain layer (`LoginUseCase`, `GetDevicesUseCase`, etc.) but are not wired into providers — providers call repositories directly. This is a transitional pattern.
 - **Charts** (`fl_chart`) is a dependency but no chart widgets have been implemented yet.
 - **Firebase Cloud Messaging** is not yet wired in.

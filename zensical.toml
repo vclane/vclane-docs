@@ -19,6 +19,7 @@ nav = [
     { "Traffic Controller" = "traffic-controller.md" },
     { "Backend API" = "backend-api.md" },
     { "Media Server" = "media-server.md" },
+    { "Streaming Options" = "media-server-options.md" },
     { "MQTT Communication" = "mqtt-communication.md" },
     { "Server Integration" = "server-integration.md" },
     { "Mobile App" = "mobile-app.md" },

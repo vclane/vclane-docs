@@ -8,15 +8,19 @@ The backend acts as the centralized management and coordination layer between us
 graph TB
     subgraph Server["VCLane Server (Docker Compose)"]
         Caddy["Reverse Proxy — Caddy<br/>(TLS termination)"]
-        Backend["Backend API — FastAPI<br/>(Auth / Commands / Telemetry)"]
-        Media["Media Server — MediaMTX<br/>(RTSP / WebRTC relay)"]
+        Backend["Backend API — FastAPI<br/>(Auth / Commands / Telemetry / WHEP proxy)"]
+        Media["Media Server — MediaMTX<br/>(RTSP ingest / auth)"]
+        RTC["WebRTC Delivery — go2rtc<br/>(on-demand WHEP / MSE)"]
         MQTT["MQTT Broker — Mosquitto<br/>(TLS + password auth)"]
 
         Caddy -->|"/api/* /ws/* /health"| Backend
-        Caddy -->|"/stream/*"| Media
+        Backend -->|"Stream registration + SDP proxy"| RTC
         Backend -->|"Auth query"| Media
+        RTC -->|"RTSP pull (on demand)"| Media
     end
 
+    Clients["Operators<br/>(Mobile / Web)"] -->|"HTTPS /api/*"| Caddy
+    Clients -->|"WebRTC media :8555"| RTC
     Backend -->|"Auth / DB"| Firebase["Firebase Services<br/>(Auth / Firestore / RTDB)"]
     MQTT -->|"Commands / Sync"| Edge["Raspberry Pi Edge Devices"]
     Edge -->|"Telemetry / Heartbeat / Ack"| MQTT
@@ -48,7 +52,7 @@ graph TB
 | Authentication       | Firebase Admin SDK + JWT + bcrypt   |
 | Database             | Firestore                           |
 | Real-Time Telemetry  | Realtime Database                   |
-| Media Server         | MediaMTX (RTSP / WebRTC)            |
+| Media Server         | MediaMTX (RTSP ingest) + go2rtc (WebRTC) |
 | Reverse Proxy        | Caddy                               |
 | API Documentation    | OpenAPI / Swagger                   |
 | Containerization     | Docker + Docker Compose             |
@@ -63,6 +67,8 @@ graph TB
 **Traffic Control** — Send traffic signal commands, trigger manual overrides, manage intersection schedules (turns loop + per-group `schedulingMode: fixed | dynamic`), coordinate multiple intersections, process command responses. In `dynamic` mode the backend runs a queue gate on new `POST /api/devices/{id}/detections` docs (vehicle allowlist + staleness guard → `enqueue` when RED/CAUTION + not already queued) and clears RTDB `has_queued_schedule` on controller queue-completion. Each group has an `enqueueEdgeDetections` switch (default `true`); when `false`, detections are stored but never enqueued. An admin may send `forceEnqueue=true` to skip the gate and the group switch. Detections whose `class` is an emergency class skip the queue and publish a `signal_override` instead (detecting device `GREEN`, siblings `RED`, 60 s) in both scheduling modes.
 
 **Real-Time Synchronization** — MQTT command publishing, device heartbeat processing, WebSocket client updates, event notifications.
+
+**Low-Latency Streaming** — Registers go2rtc streams on demand and proxies the WHEP SDP exchange; viewers authenticate with the session JWT while the go2rtc API stays private.
 
 ## REST API Endpoints
 
@@ -87,9 +93,48 @@ graph TB
 | `POST`   | `/api/groups/{id}/schedule`  | JWT  | Publish + persist group schedule             |
 | `GET`    | `/api/groups/{id}/schedule`  | JWT  | Get the stored group schedule                |
 | `POST`   | `/api/groups/{id}/commands`  | JWT  | Send command to the group controller         |
-| `GET`    | `/api/mediamtx/auth`         | None | MediaMTX auth callback                       |
+| `POST`   | `/api/devices/{id}/whep`     | JWT  | Exchange WHEP SDP offer for an SDP answer; registers the go2rtc stream on demand |
+| `POST`   | `/api/mediamtx/auth`         | None | MediaMTX auth callback (publish, read, and go2rtc service account) |
 
 See [Server Integration](server-integration.md) for details on authentication flows, MQTT communication, and component integration.
+
+## Stream Access (WHEP)
+
+Viewers do not read from MediaMTX directly. The backend exchanges a WHEP offer/answer with go2rtc, which pulls the device stream from MediaMTX on demand.
+
+```
+POST /api/devices/{id}/whep
+Authorization: Bearer <session JWT>
+Content-Type: application/sdp
+
+<WHEP offer SDP>
+```
+
+| Aspect | Value |
+| ------ | ----- |
+| Auth | Session JWT (`get_current_user`) |
+| Request body | Raw WHEP offer (`application/sdp`) |
+| Success | `201`, `Content-Type: application/sdp`, raw answer |
+| `404` | Unknown device |
+| `502` | go2rtc unreachable or stream registration failed |
+| `401/403` | Missing/invalid session |
+
+Flow:
+
+1. Verify the session and that the device exists.
+2. Ensure the go2rtc stream exists:
+   `PUT http://go2rtc:1984/api/streams?name={id}&src=rtsp://{GO2RTC_MEDIA_USER}:{secret}@mediamtx:8554/{id}`
+3. Forward the offer to `POST http://go2rtc:1984/api/webrtc?src={id}` with the go2rtc Basic-auth credentials.
+4. Return the SDP answer unchanged.
+
+Operational notes:
+
+- The go2rtc API stays on the internal Docker network; only its `8555` media port is public.
+- Streams are persisted to go2rtc's writable runtime config; a restart reloads them.
+- `DELETE /api/devices/{id}` best-effort deletes the corresponding go2rtc stream.
+- RTSP playback through MediaMTX remains available as a fallback/debug path, gated by the same auth callback.
+
+See [Server Integration](server-integration.md#backend-go2rtc-webrtc-delivery) for the full compose/config/auth spec.
 
 ## Detections via REST
 

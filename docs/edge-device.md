@@ -85,14 +85,129 @@ Data flow:
 
 ```mermaid
 graph TD
-    Camera --> OpenCV
-    OpenCV --> TRACK["YOLO + ByteTrack (track, persist=True)"]
+    Camera --> Capture["Capture loop (fps)"]
+    Capture --> Slot["Latest-frame slot"]
+    Slot --> TRACK["YOLO + ByteTrack (track, persist=True)"]
+    TRACK --> Annotate["Annotated frame"]
+    Annotate --> Slot
     TRACK --> Detect["DetectionTracker (first-seen per ID + annotated frame)"]
     Detect --> Upload["DetectionUploader (POST /detections, retry)"]
-    TRACK --> RTSP["RTSP Stream (annotated)"]
+    Slot --> PUB["Publisher (publish_fps)"]
+    PUB --> FFMPEG["FFmpeg (H.264, low-delay)"]
+    FFMPEG --> RTSP["RTSP → MediaMTX"]
 ```
 
 Set `yolo_enabled: false` for raw passthrough with no inference (or `stream_mode: direct-ffmpeg`).
+
+### Stream Publishing Pipeline
+
+The publisher must run on a **wall-clock cadence**, independent of how fast YOLO inference completes. The current build does not, which is the primary cause of growing lag and stutter.
+
+#### Current behavior (to be replaced)
+
+- When `yolo_enabled` is true, only frames selected for inference are sent (`device.py:414-424`); every other frame is read and discarded.
+- The only `send_frame` call is inside the inference worker (`device.py:337-340`).
+- FFmpeg is told the pipe runs at `settings.fps` (24) regardless of the actual inference rate (`video.py:210`).
+- The writer queue holds two frames and drops on overflow (`video.py:61-93`).
+- The RTSP muxer keeps its default ~0.7 s delay.
+
+If inference yields 12–15 fps while FFmpeg timestamps at 24 fps, the media clock runs at roughly half wall-clock speed. The stream falls further behind live and eventually stalls.
+
+#### Target design
+
+Three decoupled loops:
+
+1. **Capture** at `fps` (24).
+   - USB cameras: set `cv2.CAP_PROP_BUFFERSIZE = 1`; prefer `grab()`/`retrieve()` so the loop always reads the newest frame.
+   - Picamera2: `capture_array()` already returns the current frame.
+   - Always overwrite the latest raw frame slot; never block on inference.
+
+2. **Inference** worker.
+   - Takes the newest raw frame when idle. The capture loop only offers every `yolo_interval`-th frame, so the worker samples without blocking.
+   - Runs `track()` → `annotate()` and writes the annotated frame into the slot.
+   - A slow inference pass reduces annotation freshness only; it must not affect publish cadence.
+   - Keep a single worker so ByteTrack still sees frames in order. `yolo_interval` remains 1–2 to limit ID switches.
+
+3. **Publisher** at `publish_fps` (default 15).
+   - On every tick, take the newest annotated frame; fall back to the newest raw frame; if neither is new, repeat the last frame.
+   - Write exactly `publish_fps` frames per wall-clock second to FFmpeg.
+   - If the FFmpeg pipe backs up, drop the oldest pending frame and increment a counter; never block the capture loop.
+
+```python
+def publisher_loop():
+    frame_interval = 1.0 / settings.publish_fps
+    next_tick = time.monotonic()
+    last = None
+    while running:
+        frame = annotated_slot.get() or raw_slot.get() or last
+        if frame is not None:
+            writer.write(frame)
+            last = frame
+        next_tick += frame_interval
+        time.sleep(max(0.0, next_tick - time.monotonic()))
+```
+
+#### Configuration
+
+| Field | Default | Meaning |
+| ----- | ------- | ------- |
+| `fps` | `24` | Camera capture rate (unchanged) |
+| `publish_fps` | `15` | Actual FFmpeg/RTSP output rate |
+| `yolo_interval` | `1` | Inference sampling; affects annotation freshness, **not** publish rate |
+| `hw_encoder` | `false` | Use `h264_v4l2m2m` when available, with `libx264` fallback |
+
+`rtsp_url`, `mediamtx_host`, and `mediamtx_port` are **unchanged**. The edge still publishes to MediaMTX; go2rtc is a server-side consumer.
+
+> Provisioning caveat: the backend builds `rtspUrl` from `request.url.hostname`. Provisioning through `https://vclane.com` yields a public host that works from a remote Pi; provisioning through `http://backend:8000` yields an internal host that does not. `--rtsp-url` remains the override. This is a pre-existing provisioning concern, not part of the go2rtc change.
+
+#### FFmpeg arguments
+
+Use these for all pipelines (`opencv+ffmpeg`, `picamera2`, and the direct/GStreamer variants where applicable):
+
+```python
+"-r", str(settings.publish_fps),
+"-an",
+"-c:v", "h264_v4l2m2m" if settings.hw_encoder else "libx264",
+"-preset", "ultrafast",
+"-tune", "zerolatency",
+"-profile:v", "main",
+"-pix_fmt", "yuv420p",
+"-g", str(settings.publish_fps),
+"-keyint_min", str(settings.publish_fps),
+"-sc_threshold", "0",
+"-bf", "0",
+"-b:v", "1M",
+"-maxrate", "1M",
+"-bufsize", "1M",
+"-muxdelay", "0",
+"-muxpreload", "0",
+"-rtsp_transport", "tcp",
+"-f", "rtsp",
+url,
+```
+
+- 1 s GOP (`-g = publish_fps`) gives fast joins and clean WebRTC keyframes.
+- `-muxdelay 0 -muxpreload 0` removes the ~0.7 s RTSP mux buffer.
+- A 1 s `-bufsize` reduces encoder buffering.
+- If `h264_v4l2m2m` fails to initialize, fall back to `libx264` once and log it.
+
+#### Observability
+
+Log at the existing telemetry cadence:
+
+- `publish_fps_actual` — measured output rate
+- `frames_dropped` — writer backpressure
+- `inference_skipped` — frames not annotated
+- `ffmpeg_restarts` — pipe recoveries
+
+#### Acceptance Criteria
+
+- `ffprobe` on the MediaMTX path reports `avg_frame_rate == publish_fps`, not `fps`.
+- Clock-in-frame test: stream lag vs wall clock stays within ±0.5 s over a 10-minute run.
+- With artificially slow inference (stub the model or add a sleep), the stream still publishes at `publish_fps` with no drift.
+- Killing the backend or inference worker does not stop the publisher or trigger an FFmpeg restart loop.
+- Time-to-first-frame on LAN is under 2 s after a viewer joins.
+- A Pi 4 at 720p/`publish_fps` stays within the agreed CPU budget; otherwise enable `hw_encoder`.
 
 ## AI-Based Traffic Analysis
 
@@ -118,8 +233,8 @@ Examples:
 Tracking runs with `tracker: "bytetrack.yaml"` out of the box — `YOLODetector.track()` calls `model.track(persist=True, tracker=...)`, preserving Kalman state across frames. Requires the `lap` dependency (`pip install lap` / `uv sync`).
 
 - Annotated boxes show `{label} #{track_id} {conf:.2f}` (e.g. `car #7 0.82`).
-- **Frame ordering matters:** an ordered inference queue (`maxsize=1`, blocking `put(timeout=0.05)`) preserves sequence for the Kalman filter.
-- **`yolo_interval` is 1 or 2** (config-validated; `1` = every frame accuracy, `2` = every 2nd frame perf). Larger skips break the Kalman state and cause ID switches.
+- **Frame ordering matters:** a single inference worker consumes frames in order, preserving sequence for the Kalman filter. Capture does not block on it: a latest-frame slot drops intermediate frames only under overload.
+- **`yolo_interval` is 1 or 2** (config-validated; `1` = every frame accuracy, `2` = every 2nd frame perf). Larger skips break the Kalman state and cause ID switches. It controls annotation freshness, not the published frame rate — the publisher runs at `publish_fps` regardless.
 - **Stream gaps reset IDs:** on EOF / reconnect (`read_frame()` returns `None`), `reset_tracker()` clears ByteTrack state so stale tracks do not leak into the new sequence.
 - Verify manually with `python scripts/test_tracking.py --source <video|0> [--save out.mp4]` (defaults: `--model models/best.pt --conf 0.4 --imgsz 416 --tracker bytetrack.yaml`).
 
@@ -250,6 +365,8 @@ Example `config.json`:
   "api_url": "https://vclane.example.com",
   "tracker": "bytetrack.yaml",
   "yolo_interval": 1,
+  "publish_fps": 15,
+  "hw_encoder": false,
   "detections_enabled": true,
   "detections_max_queue": 200,
   "relay_blink_normal": 3,
@@ -258,7 +375,7 @@ Example `config.json`:
 }
 ```
 
-`tracker` is required (default `bytetrack.yaml`); `yolo_interval` is validated to 1–2 (`1` accuracy, `2` perf). Set `yolo_enabled: false` (or `stream_mode: direct-ffmpeg`) for raw passthrough with no inference.
+`tracker` is required (default `bytetrack.yaml`); `yolo_interval` is validated to 1–2 (`1` accuracy, `2` perf). `publish_fps` (default `15`) is the actual RTSP output rate and is independent of both `fps` and `yolo_interval`. `hw_encoder` enables `h264_v4l2m2m` on supported Pis with an automatic `libx264` fallback. Set `yolo_enabled: false` (or `stream_mode: direct-ffmpeg`) for raw passthrough with no inference.
 
 `relay_blink_normal` / `relay_blink_override` select the blink count before latching solid (3 on schedule transitions, 5 when the phase frame has `ov: true`); `relay_blink_interval` is the seconds per on/off step.
 
@@ -266,9 +383,9 @@ Example `config.json`:
 
 | Mode                      | Description                                                            |
 | ------------------------- | ---------------------------------------------------------------------- |
-| `opencv+ffmpeg` (default) | OpenCV capture → YOLO track → FFmpeg stdin → RTSP                     |
-| `direct-ffmpeg`           | Source → FFmpeg → RTSP (no OpenCV/YOLO, pure passthrough)              |
-| `opencv+gstreamer`        | OpenCV capture → YOLO → GStreamer → RTSP (falls back to opencv+ffmpeg) |
+| `opencv+ffmpeg` (default) | OpenCV capture → latest-frame slot → YOLO annotate → fixed-rate publisher → FFmpeg → RTSP |
+| `direct-ffmpeg`           | Source → FFmpeg → RTSP (no OpenCV/YOLO, pure passthrough)                                  |
+| `opencv+gstreamer`        | OpenCV capture → latest-frame slot → YOLO → publisher → GStreamer → RTSP (falls back to opencv+ffmpeg) |
 
 ### Registration Flow
 
@@ -298,7 +415,7 @@ At `run` start the backend client authenticates once (`POST /api/auth/login`) be
 | Actuator Interface          | GPIO-controlled Relay Board    |
 | MQTT Communication          | Eclipse Paho MQTT Client       |
 | Communication Protocol      | MQTT over TLS (to Backend)     |
-| Video Streaming             | RTSP Publisher                 |
+| Video Streaming             | RTSP Publisher (H.264, fixed `publish_fps`) |
 | Containerization (Optional) | Docker                         |
 
 ## Key Features
@@ -314,3 +431,5 @@ At `run` start the backend client authenticates once (`POST /api/auth/login`) be
 **Device Monitoring** — Periodic lean telemetry (active signal, emergency-vehicle flag) and heartbeat reporting (uptime, timestamp).
 
 **Secure Backend Communication** — Device heartbeat reporting, telemetry publishing, remote configuration updates.
+
+**Low-Latency Publishing** — A wall-clock publisher decouples the RTSP frame rate from YOLO inference, and low-delay FFmpeg mux flags keep the stream close to real time.

@@ -1,6 +1,6 @@
 # Server Integration
 
-The VCLane server is a Docker Compose stack of four services — Caddy, Backend (FastAPI), MediaMTX, and Mosquitto — that work together to manage edge devices, relay video streams, and handle real-time communication.
+The VCLane server is a Docker Compose stack of five services — Caddy, Backend (FastAPI), MediaMTX, go2rtc, and Mosquitto — that work together to manage edge devices, relay video streams, and handle real-time communication. MediaMTX ingests RTSP from edge devices; go2rtc pulls those streams on demand and delivers them to viewers over WebRTC/WHEP.
 
 ## Backend API
 
@@ -12,15 +12,19 @@ The backend acts as the centralized management and coordination layer between us
 graph TB
     subgraph Server["VCLane Server (Docker Compose)"]
         Caddy["Reverse Proxy — Caddy<br/>(TLS termination)"]
-        Backend["Backend API — FastAPI<br/>(Auth / Commands / Telemetry)"]
-        Media["Media Server — MediaMTX<br/>(RTSP / WebRTC relay)"]
+        Backend["Backend API — FastAPI<br/>(Auth / Commands / Telemetry / WHEP proxy)"]
+        Media["Media Server — MediaMTX<br/>(RTSP ingest / auth)"]
+        RTC["WebRTC Delivery — go2rtc<br/>(on-demand WHEP / MSE)"]
         MQTT["MQTT Broker — Mosquitto<br/>(TLS + Dynamic Security)"]
 
         Caddy -->|"/api/* /ws/* /health"| Backend
-        Caddy -->|"/stream/*"| Media
+        Backend -->|"Stream registration + SDP proxy"| RTC
         Backend -->|"Auth query"| Media
+        RTC -->|"RTSP pull (on demand)"| Media
     end
 
+    Clients["Operators<br/>(Mobile / Web)"] -->|"HTTPS /api/*"| Caddy
+    Clients -->|"WebRTC media :8555"| RTC
     Backend -->|"Auth / DB"| Firebase["Firebase Services<br/>(Auth / Firestore / RTDB)"]
     MQTT -->|"Commands / Sync"| Edge["Raspberry Pi Edge Devices"]
     Edge -->|"Telemetry / Heartbeat / Ack"| MQTT
@@ -52,7 +56,7 @@ graph TB
 | Authentication       | Firebase Admin SDK + JWT + bcrypt   |
 | Database             | Firestore                           |
 | Real-Time Telemetry  | Realtime Database                   |
-| Media Server         | MediaMTX (RTSP / WebRTC)            |
+| Media Server         | MediaMTX (RTSP ingest) + go2rtc (WebRTC) |
 | Reverse Proxy        | Caddy                               |
 | API Documentation    | OpenAPI / Swagger                   |
 | Containerization     | Docker + Docker Compose             |
@@ -76,25 +80,35 @@ MediaMTX is configured to delegate authentication to the backend via HTTP callba
 
 ```yaml
 # provisions/mediamtx/mediamtx.dev.yml
-authMethods:
-  - http
+authMethod: http
 authHTTPAddress: http://backend:8000/api/mediamtx/auth
+authHTTPExclude: []
 ```
 
-On every RTSP publish or play action, MediaMTX issues an HTTP GET to the backend:
+On every RTSP publish or play action, MediaMTX issues an HTTP `POST` to the backend with a JSON body:
 
+```json
+{
+  "user": "{user}",
+  "password": "{password}",
+  "action": "publish|read",
+  "path": "{path}",
+  "protocol": "rtsp",
+  "ip": "{clientIp}"
+}
 ```
-GET /api/mediamtx/auth?user={user}&password={password}&action={action}&path={path}
-```
+
+The current backend model reads `user`, `password`, `action`, and `path`; `ip` and `protocol` are available if tighter authorization is added later.
 
 ### Auth Flow
 
-The backend tries two strategies in order:
+The backend tries three strategies in order:
 
-1. **JWT session auth** — treats `user` as a session token, verified via `verify_session_token()`. Used by human operators viewing streams through the mobile app.
-2. **Device secret auth** — looks up `devices/{deviceId}` in Firestore, retrieves `deviceSecretHash`, verifies the `password` field with bcrypt. Used by edge devices publishing streams.
+1. **go2rtc service account** — `user` equals `GO2RTC_MEDIA_USER`, `action` is `read`, and the password matches `GO2RTC_MEDIA_SECRET` (constant-time compare). Used by go2rtc pulling from MediaMTX.
+2. **JWT session auth** — treats `user` as a session token, verified via `verify_session_token()`. Used by human operators reading RTSP directly (fallback/debug).
+3. **Device secret auth** — looks up `devices/{deviceId}` in Firestore, retrieves `deviceSecretHash`, verifies the `password` field with bcrypt. Used by edge devices publishing streams.
 
-Both strategies return `200 OK` on success or `403 Forbidden` on failure. No path-level or action-level authorization is enforced beyond credential verification.
+All three strategies return `200 OK` on success or `403 Forbidden` on failure. No path-level or action-level authorization is enforced beyond credential verification.
 
 ### RTSP URL Format
 
@@ -107,6 +121,177 @@ rtsp://{deviceId}@mediamtx:8554/{deviceId}
 - The `deviceId` serves as the RTSP username (sent as `user` in the auth callback).
 - The `deviceSecret` serves as the RTSP password (sent as `password`).
 - The path (same as `deviceId`) is used by MediaMTX to identify the stream.
+
+This URL is **unchanged** by the go2rtc addition. The edge keeps publishing to MediaMTX; go2rtc reads from MediaMTX using a separate internal service-account URL (`rtsp://{GO2RTC_MEDIA_USER}:{GO2RTC_MEDIA_SECRET}@mediamtx:8554/{deviceId}`) that is never exposed to devices.
+
+---
+
+## Backend ↔ go2rtc (WebRTC Delivery)
+
+go2rtc is the low-latency delivery plane. It pulls RTSP from MediaMTX **on demand** and serves WebRTC/WHEP to viewers. The backend never proxies media; it registers the stream and forwards the SDP offer/answer.
+
+### Docker Compose
+
+Add one service per profile, mirroring the MediaMTX pattern. The dev service is shown; `go2rtc-prod` uses `mediamtx-prod`, `backend-prod`, and the `prod` profile.
+
+```yaml
+go2rtc:
+  image: alexxit/go2rtc:1.9.13        # pin a tested tag; never :latest
+  profiles:
+    - dev
+  command:
+    - "-c"
+    - "/config/runtime/go2rtc.yml"   # writable config; ConfigPath for PUT/DELETE
+    - "-c"
+    - "/config/go2rtc.yml"           # read-only base
+  volumes:
+    - ./provisions/go2rtc/go2rtc.yml:/config/go2rtc.yml:ro
+    - go2rtc_runtime:/config/runtime
+  environment:
+    GO2RTC_API_USER: ${GO2RTC_API_USER}
+    GO2RTC_API_PASS: ${GO2RTC_API_PASS}
+    GO2RTC_MEDIA_USER: ${GO2RTC_MEDIA_USER}
+    GO2RTC_MEDIA_SECRET: ${GO2RTC_MEDIA_SECRET}
+  ports:
+    - "8555:8555/tcp"
+    - "8555:8555/udp"
+  depends_on:
+    - mediamtx
+  networks:
+    - vclane
+```
+
+Add `go2rtc_runtime:` to the top-level `volumes:` block.
+
+- Do **not** publish `1984`; the backend reaches it over the Docker network.
+- `mediamtx` keeps only `8554:8554`.
+- Add the four variables to `.env` and `.env.example`.
+- go2rtc is a multi-arch image; no special build stage is required.
+- The runtime config **must be writable**: `PUT`/`DELETE /api/streams` call `PatchConfig`, which writes to the first `-c` file. A read-only config makes those requests return `400` after mutating memory. The base config is mounted read-only and the runtime file lives in a named volume.
+
+### go2rtc Configuration
+
+```yaml
+# provisions/go2rtc/go2rtc.yml
+api:
+  listen: ":1984"
+  username: ${GO2RTC_API_USER}
+  password: ${GO2RTC_API_PASS}
+  local_auth: true
+
+rtsp:
+  listen: ""            # ingestion belongs to MediaMTX
+
+webrtc:
+  listen: ":8555"
+  candidates:
+    - vclane.com:8555   # public host for the deployment
+  ice_servers:
+    - urls: [stun:stun.cloudflare.com:3478]
+```
+
+Notes:
+
+- `rtsp.listen: ""` prevents a second, unauthenticated RTSP server from appearing.
+- `candidates` must advertise an address viewers can reach. Use `stun:8555` when the public IP is dynamic; symmetric NAT may require TURN.
+- `local_auth: true` closes the loopback bypass.
+- Do **not** define a `streams:` key in this base file. Runtime entries live in `/config/runtime/go2rtc.yml`, which is loaded first and is the file `PatchConfig` writes. A `streams:` map here would override the runtime entries on load.
+- Runtime entries persist in the `go2rtc_runtime` volume across restarts. Delete stale entries via the API or remove the volume.
+- The runtime config contains the media service-account secret; treat the `go2rtc_runtime` volume as sensitive.
+
+### Backend Configuration
+
+```python
+# backend/app/config.py
+go2rtc_url: str = "http://go2rtc:1984"
+go2rtc_api_user: str = ""
+go2rtc_api_pass: str = ""
+go2rtc_media_user: str = "go2rtc"
+go2rtc_media_secret: str = ""
+```
+
+### MediaMTX Service Account
+
+The existing `/api/mediamtx/auth` callback gains a reader branch before the device-secret check:
+
+```python
+if (
+    body.user == settings.go2rtc_media_user
+    and body.action == "read"
+    and secrets.compare_digest(body.password, settings.go2rtc_media_secret)
+):
+    return Response(status_code=200)
+```
+
+- Keep `authHTTPExclude: []`.
+- Do **not** exclude `action: read` globally — that would allow anonymous reads.
+- MediaMTX does not support HTTP and internal auth simultaneously (bluenviron/mediamtx#4659), so a shared reader account is the supported approach.
+- The comparison uses `secrets.compare_digest` to avoid timing leaks.
+
+### WHEP Endpoint
+
+`POST /api/devices/{deviceId}/whep`
+
+| Aspect | Value |
+| ------ | ----- |
+| Auth | Bearer session JWT (`get_current_user`) |
+| Request | `Content-Type: application/sdp`, raw WHEP offer |
+| Success | `201`, `Content-Type: application/sdp`, raw SDP answer |
+| Errors | `404` unknown device · `502` go2rtc failure · `401/403` auth |
+
+Flow:
+
+1. Verify the session and that the device exists.
+2. Ensure the go2rtc stream exists (idempotent):
+   ```
+   PUT {GO2RTC_URL}/api/streams
+       ?name={deviceId}
+       &src=rtsp://{GO2RTC_MEDIA_USER}:{urlquote(GO2RTC_MEDIA_SECRET)}@mediamtx:8554/{deviceId}
+   ```
+   `PUT` creates or replaces the named stream, so repeating the call is safe.
+3. Forward the offer with Basic auth:
+   ```
+   POST {GO2RTC_URL}/api/webrtc?src={deviceId}
+   Content-Type: application/sdp
+   Authorization: Basic base64(GO2RTC_API_USER:GO2RTC_API_PASS)
+   ```
+4. Return go2rtc's `201` SDP answer unchanged.
+
+Cleanup: `DELETE /api/devices/{id}` also calls `DELETE {GO2RTC_URL}/api/streams?src={id}` best-effort. No token table or TTL is required because the endpoint is JWT-gated and the go2rtc API is private.
+
+Rejected alternative: exposing `1984` and using Caddy `forward_auth`. It either hands clients the go2rtc Basic-auth credentials or requires path rewriting plus an exposed stream list.
+
+### Ports and Firewall
+
+| Port | Service | Exposure | Purpose |
+| ---- | ------- | -------- | ------- |
+| `8554/tcp` | MediaMTX | Edge devices / VPN | RTSP publish |
+| `8555/tcp` + `8555/udp` | go2rtc | Public | WebRTC media |
+| `1984/tcp` | go2rtc | Internal only | API, stream registration, WHEP signaling |
+| `8889/tcp` | MediaMTX | Internal only | Native WebRTC (legacy/debug) |
+| `443/tcp` | Caddy | Public | `/api/*`, `/ws/*`, `/health` |
+
+Caddy must not be used for media. Only the SDP exchange traverses `/api/*`.
+
+### Acceptance Criteria
+
+- Two clients watch the same device concurrently through `/api/devices/{id}/whep`.
+- ICE selects the `8555` candidate; no media appears in Caddy logs.
+- `GET go2rtc:1984/api/streams` shows consumers return to `0` within 10 s of the last viewer leaving.
+- Restarting go2rtc reloads the runtime streams; no backend restart is required.
+- A 24 h join/leave soak shows no leaked producers/consumers and no file-descriptor growth.
+- `1984` is unreachable from outside the Docker network.
+- `authHTTPExclude` remains `[]`, and a read with wrong credentials still returns `403`.
+
+### Failure Modes
+
+| Symptom | Likely cause | Action |
+| ------- | ------------ | ------ |
+| WHEP `502` | go2rtc down or stream registration failed | Check `go2rtc` logs and `GET /api/streams` |
+| ICE connects, no video | `8555` blocked or wrong `candidates` | Verify UDP/TCP firewall and public host |
+| Read `403` from MediaMTX | service-account secret mismatch | Compare `.env` values and the callback branch |
+| Stream disappears after restart | runtime config missing or not writable | Check the `go2rtc_runtime` volume and `-c` order |
+| High latency despite WHEP | edge publish drift | Fix the edge publisher (see [Edge Device](edge-device.md#stream-publishing-pipeline)) |
 
 ---
 
@@ -179,8 +364,8 @@ sequenceDiagram
     MQTT-->>-Edge: Role-based ACL granted<br/>(own device topics + group topics)
 
     Edge->>+MTX: RTSP publish<br/>rtsp://deviceId@mediamtx:8554/deviceId
-    MTX->>+API: GET /api/mediamtx/auth<br/>?user=deviceId&password=deviceSecret
-    Note over API: JWT verify fails → device auth
+    MTX->>+API: POST /api/mediamtx/auth<br/>{user, password, action:"publish", path}
+    Note over API: go2rtc account? no → JWT? no → device auth
 
     API->>+DB: read devices/{deviceId}.deviceSecretHash
     DB-->>-API: bcrypt hash
@@ -376,4 +561,5 @@ docker compose up -d mosquitto
 | `POST`   | `/api/devices/{id}/signal`     | JWT      | Override traffic signal          | MQTT publish + Firestore write                                   |
 | `POST`   | `/api/devices/{id}/detections` | JWT      | Submit per-vehicle detection (admin-only `forceEnqueue`) | Optional Storage upload + Firestore `detections` write; may publish `enqueue` and set RTDB queue flags |
 | `POST`   | `/api/groups/{id}/sync`        | JWT      | Trigger group prepare            | MQTT publish to `traffic/group/{id}/prepare`                     |
-| `GET`    | `/api/mediamtx/auth`           | _(none)_ | MediaMTX auth callback           | Reads Firestore, bcrypt verify                                   |
+| `POST`   | `/api/devices/{id}/whep`       | JWT      | Exchange WHEP offer for an SDP answer | Registers the go2rtc stream on demand; returns SDP; no MQTT/RPC side-effect |
+| `POST`   | `/api/mediamtx/auth`           | _(none)_ | MediaMTX auth callback           | Reads Firestore, bcrypt verify; allows the go2rtc reader account |

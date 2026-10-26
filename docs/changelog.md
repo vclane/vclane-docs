@@ -4,6 +4,64 @@ This changelog tracks system-wide architectural modifications. Submodule develop
 
 ---
 
+## [2.14.0] — 2026-10-27
+
+### go2rtc Low-Latency WebRTC Delivery + Edge Publish-Rate Fix
+
+Live monitoring moves from direct RTSP playback to WebRTC delivery through **go2rtc**, while **MediaMTX** keeps RTSP ingest, authentication, and recording. The edge publisher is reworked to publish on a wall-clock cadence, fixing the growing lag caused by inference-rate frames being timestamped at the configured FPS.
+
+#### Summary of Major Changes
+1.  **Additional server:** go2rtc runs alongside MediaMTX and pulls each device's RTSP stream **on demand**. It serves WHEP/WebRTC to mobile and web, with MSE/HLS fallbacks. MIT-licensed, one container.
+2.  **MediaMTX unchanged as the ingest boundary:** edge devices keep publishing `rtsp://{deviceId}:{deviceSecret}@mediamtx:8554/{deviceId}`. `rtsp_url`, `mediamtx_host`, and `mediamtx_port` do not change.
+3.  **Backend-proxied WHEP:** new `POST /api/devices/{id}/whep` registers the go2rtc stream and forwards the SDP offer/answer. The go2rtc API (`1984`) stays on the internal Docker network; only `8555/tcp+udp` is public.
+4.  **go2rtc reader account:** the MediaMTX auth callback accepts `GO2RTC_MEDIA_USER` / `GO2RTC_MEDIA_SECRET` for `action: read`; all other requests keep the existing JWT/device-secret rules.
+5.  **Edge publisher redesign:** capture, inference, and publish are decoupled. A latest-frame slot feeds a fixed-rate publisher (`publish_fps`, default 15), so slow YOLO inference no longer drifts the media clock.
+6.  **Low-delay FFmpeg:** `-r`/`-g` use `publish_fps`, plus `-muxdelay 0 -muxpreload 0`, 1 s `-bufsize`, and an optional `h264_v4l2m2m` encoder with `libx264` fallback.
+7.  **Client switch:** Flutter uses `flutter_webrtc` WHEP; `media_kit` RTSP remains as a fallback/debug path. Web dashboard uses `RTCPeerConnection`.
+8.  **Ports:** `8555/tcp` + `8555/udp` public for WebRTC media; `1984` internal only; the dead Caddy `/stream/*` route is removed.
+9.  **Docs-only:** other components implement from this entry. The comparison and rationale live in `docs/media-server-options.md`.
+
+#### Server Implementation Checklist
+- [ ] Add `go2rtc` (dev) and `go2rtc-prod` (prod) services to `docker-compose.yml`; pin a tested 1.9.x tag.
+- [ ] Add `provisions/go2rtc/go2rtc.yml` with `api`, `rtsp.listen: ""`, `webrtc.listen: ":8555"`, `candidates`, and `ice_servers`.
+- [ ] Add a writable `go2rtc_runtime` volume and start go2rtc with `-c /config/runtime/go2rtc.yml -c /config/go2rtc.yml`; keep the base config read-only.
+- [ ] Publish `8555/tcp` and `8555/udp`; leave `1984` unpublished.
+- [ ] Add `GO2RTC_URL`, `GO2RTC_API_USER`, `GO2RTC_API_PASS`, `GO2RTC_MEDIA_USER`, `GO2RTC_MEDIA_SECRET` to `.env` / `.env.example` and `config.py`.
+- [ ] Add the go2rtc reader branch to `/api/mediamtx/auth` using `secrets.compare_digest`; keep `authHTTPExclude: []`.
+- [ ] Implement `POST /api/devices/{id}/whep` with stream registration + SDP proxy; map failures to `404`/`502`.
+- [ ] Delete the go2rtc stream best-effort on `DELETE /api/devices/{id}`.
+- [ ] Remove `/stream/*` from both Caddyfiles.
+- [ ] Verify two concurrent viewers, consumer cleanup, and a 24 h join/leave soak.
+- [ ] Verify `1984` is unreachable externally and `8555` is reachable on UDP and TCP.
+
+#### Edge Implementation Checklist
+- [ ] Add `publish_fps` (default 15) and `hw_encoder` (default false) to `VclaneSettings`, plus `--publish-fps` / `--hw-encoder` CLI flags.
+- [ ] Add a lock-protected latest-frame slot; capture overwrites it without blocking.
+- [ ] Move `send_frame` out of `_inference_worker` into a dedicated publisher thread running at `publish_fps`.
+- [ ] Inference worker takes the newest frame, annotates, and writes back to the slot; it never gates publishing.
+- [ ] Replace the fixed `-r fps` with `-r publish_fps`; update `-g`/`-keyint_min`/`-sc_threshold`.
+- [ ] Add `-muxdelay 0 -muxpreload 0`, `-bufsize 1M`, `-profile:v main`.
+- [ ] Add `h264_v4l2m2m` when `hw_encoder=true`, with a one-time `libx264` fallback.
+- [ ] Set `cv2.CAP_PROP_BUFFERSIZE = 1` for USB cameras.
+- [ ] Log `publish_fps_actual`, `frames_dropped`, `inference_skipped`, `ffmpeg_restarts`.
+- [ ] Keep `rtsp_url` and MediaMTX addressing unchanged.
+- [ ] Verify `ffprobe` reports `publish_fps`, lag stays within ±0.5 s over 10 min, and slow inference does not drift the stream.
+
+#### Client Implementation Checklist
+- [ ] Add `flutter_webrtc`; implement `RTCPeerConnection` + `RTCVideoRenderer` on `/devices/:id/stream`.
+- [ ] Create a recvonly video transceiver, POST the offer to `/api/devices/{id}/whep`, apply the answer.
+- [ ] Handle `onTrack`, connection failure, retry, and ICE failure.
+- [ ] Keep `media_kit` RTSP behind a fallback/debug toggle.
+- [ ] Update the web dashboard to the same WHEP flow.
+
+#### Notes
+- The edge fix is a prerequisite for sub-second latency. WHEP alone removes client-side buffering; it cannot correct a drifting publisher.
+- go2rtc is effectively single-maintainer — pin the image tag and do not track `:latest`.
+- WebRTC media requires public `8555`; symmetric NAT may require a TURN server.
+- The 2.11.0 LiveKit Cloud migration remains reverted; this entry does not reintroduce per-minute cloud billing.
+
+---
+
 ## [2.13.0] — 2026-10-25
 
 ### Emergency-Class Detections Request a Signal Override

@@ -14,8 +14,9 @@ The system follows an **edge computing architecture**, where every traffic inter
 | 4   | [Traffic Controller](traffic-controller.md)             | ESP-32 Traffic Controller — local group scheduling and LoRa broadcasts                       |
 | 5   | [Backend API](backend-api.md)                           | Backend — FastAPI, device management, traffic coordination                                  |
 | 6   | [MQTT Communication](mqtt-communication.md)             | MQTT layer — broker, security, topic structure, telemetry                                   |
-| 7   | [Media Server](media-server.md)                         | Video streaming — MediaMTX, RTSP, WebRTC                                                    |
-| 8   | [Mobile App](mobile-app.md)                             | Flutter application — auth, dashboard, video playback, device control                       |
-| 9   | [Features](features.md)                                 | System-wide key features                                                                    |
-| 10  | [Architectural Advantages](architectural-advantages.md) | Low latency, scalability, resilience, security                                              |
-| 11  | [Changelog](changelog.md)                               | System and submodule-specific change log                                                    |
+| 7   | [Media Server](media-server.md)                         | Video streaming — MediaMTX ingest + go2rtc WebRTC delivery                                  |
+| 8   | [Streaming Options](media-server-options.md)            | Free streaming-server comparison and selection rationale                                    |
+| 9   | [Mobile App](mobile-app.md)                             | Flutter application — auth, dashboard, video playback, device control                       |
+| 10  | [Features](features.md)                                 | System-wide key features                                                                    |
+| 11  | [Architectural Advantages](architectural-advantages.md) | Low latency, scalability, resilience, security                                              |
+| 12  | [Changelog](changelog.md)                               | System and submodule-specific change log                                                    |

@@ -6,7 +6,10 @@ graph TB
 
     subgraph System["VCLane System"]
         App -->|"REST API"| Backend["Backend API — FastAPI"]
-        App -.->|"RTSP / WebRTC"| Media["Media Server — MediaMTX"]
+        App -.->|"WHEP / WebRTC"| RTC["WebRTC Delivery — go2rtc"]
+        App -.->|"RTSP (fallback)"| Media["Media Server — MediaMTX<br/>(RTSP ingest)"]
+        Backend -->|"WHEP SDP proxy"| RTC
+        RTC -->|"RTSP pull (on demand)"| Media
 
         Backend -->|"Commands / Overrides"| MQTT["MQTT Broker — EMQX / Mosquitto"]
         Backend -->|"Auth / DB"| Firebase["Firebase Services"]
@@ -55,3 +58,7 @@ In case of connectivity interruptions:
 
 - **Complete Internet Loss:** If the intersection group loses internet connection entirely, the **ESP-32 Traffic Controller** fails over to offline mode. Using its internal battery-backed Real-Time Clock (RTC) and cached schedule, it runs the cached fixed turns loop (even for `dynamic` groups, since server-mediated queueing is unavailable offline) and broadcasts phase assignments via LoRa. The Raspberry Pis continue to receive LoRa signals and actuate the lights, keeping the intersection cluster synchronized. Note: groups running `sync_transport: mqtt` have no offline phase sync — without broker connectivity the edge devices enter caution mode.
 - **Edge Device Connection Loss:** If a Raspberry Pi Edge Device loses its internet connection, it is unable to report telemetry to the backend and is marked offline. Telemetry is published exclusively by edge devices — the ESP-32 Traffic Controller does not publish telemetry on their behalf, so an offline edge is simply reported offline until it reconnects.
+
+## Live Video Path
+
+Edge devices publish H.264 over RTSP to **MediaMTX**, the only ingest point, which enforces authentication through the backend callback. When an operator opens a stream, the app requests a WHEP session from the backend; the backend registers the device with **go2rtc**, which pulls the RTSP feed from MediaMTX on demand and sends WebRTC media directly to the viewer. MediaMTX remains available for direct RTSP playback as a debug/fallback path. See [Media Server](media-server.md) and [Server Integration](server-integration.md).
