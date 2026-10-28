@@ -155,6 +155,9 @@ def publisher_loop():
 | `publish_fps` | `15` | Actual FFmpeg/RTSP output rate |
 | `yolo_interval` | `1` | Inference sampling; affects annotation freshness, **not** publish rate |
 | `hw_encoder` | `false` | Use `h264_v4l2m2m` when available, with `libx264` fallback |
+| `video_bitrate` | `1M` | H.264 target/max bitrate (`600k`, `1M`, ...); lower it for constrained uplinks |
+
+Picamera2 is opened at `fps` with `buffer_count=2`, so capture does not run at the sensor's default 30 fps.
 
 `rtsp_url`, `mediamtx_host`, and `mediamtx_port` are **unchanged**. The edge still publishes to MediaMTX; go2rtc is a server-side consumer.
 
@@ -176,9 +179,9 @@ Use these for all pipelines (`opencv+ffmpeg`, `picamera2`, and the direct/GStrea
 "-keyint_min", str(settings.publish_fps),
 "-sc_threshold", "0",
 "-bf", "0",
-"-b:v", "1M",
-"-maxrate", "1M",
-"-bufsize", "1M",
+"-b:v", settings.video_bitrate,
+"-maxrate", settings.video_bitrate,
+"-bufsize", settings.video_bitrate,
 "-muxdelay", "0",
 "-muxpreload", "0",
 "-rtsp_transport", "tcp",

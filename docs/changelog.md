@@ -24,7 +24,7 @@ Live monitoring moves from direct RTSP playback to WebRTC delivery through **go2
 #### Server Implementation Checklist
 - [ ] Add `go2rtc` (dev) and `go2rtc-prod` (prod) services to `docker-compose.yml`; pin a tested 1.9.x tag.
 - [ ] Add `provisions/go2rtc/go2rtc.yml` with `api`, `rtsp.listen: ""`, `webrtc.listen: ":8555"`, `candidates`, and `ice_servers`.
-- [ ] Add a writable `go2rtc_runtime` volume and start go2rtc with `-c /config/runtime/go2rtc.yml -c /config/go2rtc.yml`; keep the base config read-only.
+- [ ] Add a writable `go2rtc_runtime` volume and start go2rtc with `go2rtc -config /config/runtime/go2rtc.yml -config /config/go2rtc.yml` (the image entrypoint is `tini`, so the binary name is required); keep the base config read-only.
 - [ ] Publish `8555/tcp` and `8555/udp`; leave `1984` unpublished.
 - [ ] Add `GO2RTC_URL`, `GO2RTC_API_USER`, `GO2RTC_API_PASS`, `GO2RTC_MEDIA_USER`, `GO2RTC_MEDIA_SECRET` to `.env` / `.env.example` and `config.py`.
 - [ ] Add the go2rtc reader branch to `/api/mediamtx/auth` using `secrets.compare_digest`; keep `authHTTPExclude: []`.

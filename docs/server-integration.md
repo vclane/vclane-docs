@@ -140,9 +140,10 @@ go2rtc:
   profiles:
     - dev
   command:
-    - "-c"
+    - "go2rtc"                       # image entrypoint is tini; include the binary
+    - "-config"
     - "/config/runtime/go2rtc.yml"   # writable config; ConfigPath for PUT/DELETE
-    - "-c"
+    - "-config"
     - "/config/go2rtc.yml"           # read-only base
   volumes:
     - ./provisions/go2rtc/go2rtc.yml:/config/go2rtc.yml:ro
@@ -152,6 +153,7 @@ go2rtc:
     GO2RTC_API_PASS: ${GO2RTC_API_PASS}
     GO2RTC_MEDIA_USER: ${GO2RTC_MEDIA_USER}
     GO2RTC_MEDIA_SECRET: ${GO2RTC_MEDIA_SECRET}
+    GO2RTC_CANDIDATE: ${GO2RTC_CANDIDATE}   # public media host:port
   ports:
     - "8555:8555/tcp"
     - "8555:8555/udp"
@@ -163,9 +165,10 @@ go2rtc:
 
 Add `go2rtc_runtime:` to the top-level `volumes:` block.
 
+- The image entrypoint is `tini --`, so `command` **must** start with the `go2rtc` binary. Without it, tini tries to exec `-c` and the container exits `127` before go2rtc starts.
 - Do **not** publish `1984`; the backend reaches it over the Docker network.
 - `mediamtx` keeps only `8554:8554`.
-- Add the four variables to `.env` and `.env.example`.
+- Add the five variables to `.env` and `.env.example`.
 - go2rtc is a multi-arch image; no special build stage is required.
 - The runtime config **must be writable**: `PUT`/`DELETE /api/streams` call `PatchConfig`, which writes to the first `-c` file. A read-only config makes those requests return `400` after mutating memory. The base config is mounted read-only and the runtime file lives in a named volume.
 
@@ -185,7 +188,7 @@ rtsp:
 webrtc:
   listen: ":8555"
   candidates:
-    - vclane.com:8555   # public host for the deployment
+    - ${GO2RTC_CANDIDATE}   # e.g. vclane.devistlab.com:8555
   ice_servers:
     - urls: [stun:stun.cloudflare.com:3478]
 ```
@@ -193,7 +196,7 @@ webrtc:
 Notes:
 
 - `rtsp.listen: ""` prevents a second, unauthenticated RTSP server from appearing.
-- `candidates` must advertise an address viewers can reach. Use `stun:8555` when the public IP is dynamic; symmetric NAT may require TURN.
+- `candidates` must advertise an address viewers can reach. Set `GO2RTC_CANDIDATE` to the server's public media host (for this deployment, `vclane.devistlab.com:8555`) or its public IP. Do **not** use a placeholder web domain: a wrong value makes clients try an unreachable ICE host candidate and fall back to STUN or fail. Use `stun:8555` when the public IP is dynamic; symmetric NAT may require TURN.
 - `local_auth: true` closes the loopback bypass.
 - Do **not** define a `streams:` key in this base file. Runtime entries live in `/config/runtime/go2rtc.yml`, which is loaded first and is the file `PatchConfig` writes. A `streams:` map here would override the runtime entries on load.
 - Runtime entries persist in the `go2rtc_runtime` volume across restarts. Delete stale entries via the API or remove the volume.
