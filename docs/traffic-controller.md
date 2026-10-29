@@ -179,6 +179,8 @@ stateDiagram-v2
 
 ### Dynamic Queueing Flow
 
+> This section shows the controller-side view. For the full `edge → server → controller → edge` loop, including the emergency and offline paths, see [Detection to Actuation](detection-to-actuation.md).
+
 ```mermaid
 flowchart TB
     IDLE0["1. Idle<br/>all-RED broadcast"]

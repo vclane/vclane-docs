@@ -260,6 +260,8 @@ CLI flags:
 
 Under the grouped architecture, the Raspberry Pi Edge Device functions as the physical actuator for the traffic lights at its intersection. Rather than executing a standalone schedule or receiving direct signal overrides from the backend, it delegates coordination to the group's ESP-32 Traffic Controller.
 
+> For the full `edge → server → controller → edge` loop, including the emergency and offline paths, see [Detection to Actuation](detection-to-actuation.md).
+
 Key behaviors:
 
 - **Phase Reception:** The Raspberry Pi listens for phase broadcasts via the configured `sync_transport` — LoRa packets and/or MQTT `traffic/group/{groupId}/phase` frames containing the target active phases plus the `ov` override flag.

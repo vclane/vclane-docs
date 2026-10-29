@@ -15,6 +15,7 @@ nav = [
   ]},
   { "Documentation" = [
     { "Architecture" = "architecture.md" },
+    { "Detection to Actuation" = "detection-to-actuation.md" },
     { "Edge Device" = "edge-device.md" },
     { "Traffic Controller" = "traffic-controller.md" },
     { "Backend API" = "backend-api.md" },

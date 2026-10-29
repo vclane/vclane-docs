@@ -10,13 +10,14 @@ The system follows an **edge computing architecture**, where every traffic inter
 | --- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | 1   | [Overview](overview.md)                                 | System overview                                                                             |
 | 2   | [Architecture](architecture.md)                         | System architecture and component interaction                                               |
-| 3   | [Edge Device](edge-device.md)                           | Raspberry Pi edge device — video processing, AI, and traffic light actuation                |
-| 4   | [Traffic Controller](traffic-controller.md)             | ESP-32 Traffic Controller — local group scheduling and LoRa broadcasts                       |
-| 5   | [Backend API](backend-api.md)                           | Backend — FastAPI, device management, traffic coordination                                  |
-| 6   | [MQTT Communication](mqtt-communication.md)             | MQTT layer — broker, security, topic structure, telemetry                                   |
-| 7   | [Media Server](media-server.md)                         | Video streaming — MediaMTX ingest + go2rtc WebRTC delivery                                  |
-| 8   | [Streaming Options](media-server-options.md)            | Free streaming-server comparison and selection rationale                                    |
-| 9   | [Mobile App](mobile-app.md)                             | Flutter application — auth, dashboard, video playback, device control                       |
-| 10  | [Features](features.md)                                 | System-wide key features                                                                    |
-| 11  | [Architectural Advantages](architectural-advantages.md) | Low latency, scalability, resilience, security                                              |
-| 12  | [Changelog](changelog.md)                               | System and submodule-specific change log                                                    |
+| 3   | [Detection to Actuation](detection-to-actuation.md)      | End-to-end loop — detection, server gate, controller scheduling, relay actuation            |
+| 4   | [Edge Device](edge-device.md)                           | Raspberry Pi edge device — video processing, AI, and traffic light actuation                |
+| 5   | [Traffic Controller](traffic-controller.md)             | ESP-32 Traffic Controller — local group scheduling and LoRa broadcasts                       |
+| 6   | [Backend API](backend-api.md)                           | Backend — FastAPI, device management, traffic coordination                                  |
+| 7   | [MQTT Communication](mqtt-communication.md)             | MQTT layer — broker, security, topic structure, telemetry                                   |
+| 8   | [Media Server](media-server.md)                         | Video streaming — MediaMTX ingest + go2rtc WebRTC delivery                                  |
+| 9   | [Streaming Options](media-server-options.md)            | Free streaming-server comparison and selection rationale                                    |
+| 10  | [Mobile App](mobile-app.md)                             | Flutter application — auth, dashboard, video playback, device control                       |
+| 11  | [Features](features.md)                                 | System-wide key features                                                                    |
+| 12  | [Architectural Advantages](architectural-advantages.md) | Low latency, scalability, resilience, security                                              |
+| 13  | [Changelog](changelog.md)                               | System and submodule-specific change log                                                    |

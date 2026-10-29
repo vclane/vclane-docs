@@ -52,6 +52,8 @@ Under standard operating conditions with active internet connectivity:
 - **Actuation:** The Raspberry Pi units receive the phase packets and drive the physical GPIO-connected relays to actuate the traffic signal lamps.
 - **Telemetry and Streaming:** The Raspberry Pis process video streams locally, run YOLO inference for traffic analysis, and publish lean status (signal + emergency flag) and device heartbeats via MQTT. In dynamic mode, new `POST /api/devices/{id}/detections` docs trigger the queue: the backend gates on the group's `enqueueEdgeDetections` switch, vehicle allowlist, staleness, RED/CAUTION, and not-already-queued, then forwards `enqueue` to the controller and tracks `has_queued_schedule` in RTDB until completion. An admin can send `forceEnqueue=true` to skip the gate and the group switch. Detections whose `class` is `emergency vehicle` short-circuit the gate: the backend publishes `signal_override` (detecting device `GREEN`, siblings `RED`, 60 s) in both `fixed` and `dynamic` groups, falling back to a device-level override when no controller is bound. The controller appends every `enqueue` (duplicates included) to its FIFO. They also stream live RTSP video feeds to the Media Server.
 
+> For the complete `edge → server → controller → edge` loop, including the emergency and offline paths, see [Detection to Actuation](detection-to-actuation.md).
+
 ### 2. Autonomous Resilient Mode (Offline/Outage Fallback)
 
 In case of connectivity interruptions:
